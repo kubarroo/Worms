@@ -5,8 +5,8 @@
       "name": "Debug Worms",
       "type": "cppvsdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build/Worms/worms.exe",
-      "cwd": "${workspaceFolder}/build/Worms",
+      "program": "${workspaceFolder}/build/debug/Worms/worms.exe",
+      "cwd": "${workspaceFolder}/build/debug/Worms",
       "args": [],
       "stopAtEntry": false
     }
