@@ -108,6 +108,7 @@ std::vector<std::vector<SDL_Point>> MarchingSquares(Uint32* org_pixels, int w, i
                     prevY = s_y;
                     s_x += dx;
                     s_y -= dy;
+                    shapes[shapeId].emplace_back(s_x, s_y);
                     continue;
                 case 10:
                     dx = 0;
@@ -125,6 +126,7 @@ std::vector<std::vector<SDL_Point>> MarchingSquares(Uint32* org_pixels, int w, i
                     prevY = s_y;
                     s_x += dx;
                     s_y -= dy;
+                    shapes[shapeId].emplace_back(s_x, s_y);
                     continue;
                 }
 

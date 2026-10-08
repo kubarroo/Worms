@@ -14,3 +14,15 @@ include(cmake/Dependencies.cmake)
 
 add_subdirectory(ECS)
 add_subdirectory(Worms)
+
+option(WORMS_BUILD_TESTS "Build application tests" OFF)
+
+if(WORMS_BUILD_TESTS)
+    set(BUILD_TESTING ON)
+    include(CTest)
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+    set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    add_subdirectory(third_party/googletest EXCLUDE_FROM_ALL)
+    add_subdirectory(ApplicationTests)
+endif()

@@ -24,6 +24,7 @@ developed for a university computer graphics course.
 
 Dependencies are provided through Git submodules:
 SDL2, SDL2_image, SDL2_mixer, Dear ImGui, and Box2D 2.4.1.
+GoogleTest is also provided as a submodule and built when tests are enabled.
 
 Game assets and PDF documentation are stored using Git LFS.
 
@@ -32,7 +33,7 @@ Game assets and PDF documentation are stored using Git LFS.
 Install Git LFS before cloning:
 
     git lfs install
-    git clone --recurse-submodules <repository-url>
+    git clone --recurse-submodules https://github.com/kubarroo/Worms.git
     cd Worms
     git lfs pull
 
@@ -89,8 +90,28 @@ configuration before pressing F5.
 
 ## Tests
 
-ApplicationTests contains terrain contour tests. These tests are
-not yet integrated into the CMake build.
+ApplicationTests contains six GoogleTest cases for terrain contour generation
+with Marching Squares. Tests are integrated with CMake and CTest.
+
+The Debug preset enables WORMS_BUILD_TESTS; the Release preset disables it.
+Build and run the tests from the repository root:
+
+    cmake --preset debug
+    cmake --build --preset debug --target worms_tests
+    ctest --test-dir build/debug --output-on-failure
+
+To run only the diagonal contour case:
+
+    ctest --test-dir build/debug --output-on-failure -R "^ColliderFromSprite\.MarchingSquares_Diagonal2x2$"
+
+In VS Code, select the Debug configure preset and use CMake: Run Tests
+or the Testing view to run individual discovered tests.
+
+To disable tests locally:
+
+    cmake --preset debug -DWORMS_BUILD_TESTS=OFF
+
+Selecting the Debug preset again without this override re-enables tests.
 
 ## Documentation
 
