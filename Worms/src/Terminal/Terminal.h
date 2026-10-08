@@ -5,40 +5,46 @@
 
 enum LogLevel
 {
-	INFO,
-	WARNING,
-	ERROR
+    INFO,
+    WARNING,
+    ERROR
 };
 
 class Terminal
 {
 public:
-	Terminal( const Terminal& ) = delete;
-	Terminal( Terminal&& ) = delete;
+    Terminal(const Terminal&) = delete;
+    Terminal(Terminal&&) = delete;
 
-	static Terminal& Get()
-	{
-		static Terminal terminal{};
-		return terminal;
-	}
+    static Terminal& Get()
+    {
+        static Terminal terminal{};
+        return terminal;
+    }
 
-	void Log( std::string&& message, LogLevel level );
+    void Log(std::string&& message, LogLevel level);
 
-	void TurnOn();
-	void Update();
-	void Render();
+    void TurnOn();
+    void Update();
+    void Render();
 
 private:
-	std::string fileName = "logs.txt";
-	std::vector<std::string> Lines;
+    std::string fileName = "logs.txt";
+    std::vector<std::string> Lines;
 
-	std::string getCurrentTime();
-	std::string getLogLevelString( LogLevel level );
-	std::ofstream logFile;
+    std::string getCurrentTime();
+    std::string getLogLevelString(LogLevel level);
+    std::ofstream logFile;
 
-	bool open = false;
+    bool open = false;
 
-
-	Terminal() { Lines.reserve( 10000 ); logFile.open( fileName ); }
-	~Terminal() { logFile.close(); }
+    Terminal()
+    {
+        Lines.reserve(10000);
+        logFile.open(fileName);
+    }
+    ~Terminal()
+    {
+        logFile.close();
+    }
 };

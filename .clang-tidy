@@ -1,0 +1,19 @@
+Checks: >
+  -*,
+  clang-analyzer-*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  performance-*,
+  portability-*,
+  cppcoreguidelines-virtual-class-destructor,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-equals-default,
+  modernize-use-equals-delete,
+  readability-braces-around-statements,
+  readability-redundant-smartptr-get
+
+WarningsAsErrors: ''
+HeaderFilterRegex: '(^|[/\\])(ECS|Worms[/\\]src)[/\\]'
+SystemHeaders: false
+FormatStyle: file

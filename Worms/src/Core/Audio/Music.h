@@ -5,11 +5,10 @@
 class Music
 {
 public:
-	Music( const std::string& fileName );
-	void Play( unsigned int times = 1 );
-	~Music();
+    Music(const std::string& fileName);
+    void Play(unsigned int times = 1);
+    ~Music();
 
 private:
-	Mix_Music* music = NULL;
+    Mix_Music* music = NULL;
 };
-

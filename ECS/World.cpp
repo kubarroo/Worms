@@ -1,37 +1,35 @@
 #include "ECS/World.h"
 
-World::World( SDL_Renderer* renderer ) : renderer( renderer )
-{
-}
+World::World(SDL_Renderer* renderer) : renderer(renderer) {}
 
 EntityId World::CreateEntity()
 {
-	return entManager.CreateEntity();
+    return entManager.CreateEntity();
 }
 
-void World::DestroyEntity( const EntityId ent )
+void World::DestroyEntity(const EntityId ent)
 {
-	comManager.RemoveAllComponents( ent, entManager.GetSignature( ent ) );
-	entManager.DestroyEntity( ent );
-	sysManager.UnsubscribeEntity( ent );
+    comManager.RemoveAllComponents(ent, entManager.GetSignature(ent));
+    entManager.DestroyEntity(ent);
+    sysManager.UnsubscribeEntity(ent);
 }
 
-EntityId World::CopyEntity( const EntityId toCopy )
+EntityId World::CopyEntity(const EntityId toCopy)
 {
-	EntityId newId = entManager.CreateEntity();
-	Signature toCopySign = entManager.GetSignature( toCopy );
-	entManager.SetSignature( newId, toCopySign );
-	comManager.AddComponents( newId, toCopySign );
-	sysManager.OnSignatureChange( newId, toCopySign ); // Maybe could be optimised
-	return newId;
+    EntityId newId = entManager.CreateEntity();
+    Signature toCopySign = entManager.GetSignature(toCopy);
+    entManager.SetSignature(newId, toCopySign);
+    comManager.AddComponents(newId, toCopySign);
+    sysManager.OnSignatureChange(newId, toCopySign); // Maybe could be optimised
+    return newId;
 }
 
 void World::Update()
 {
-	sysManager.Update();
+    sysManager.Update();
 }
 
 void World::Render()
 {
-	sysManager.Render();
+    sysManager.Render();
 }

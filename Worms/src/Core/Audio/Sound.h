@@ -5,11 +5,10 @@
 class Sound
 {
 public:
-	Sound( const std::string& fileName );
-	void Play( unsigned int times = 1 );
-	~Sound();
+    Sound(const std::string& fileName);
+    void Play(unsigned int times = 1);
+    ~Sound();
 
 private:
-	Mix_Chunk* sound = NULL;
+    Mix_Chunk* sound = NULL;
 };
-

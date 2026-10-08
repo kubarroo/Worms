@@ -1,8 +1,8 @@
 #pragma once
+#include "../Worms/src/ExceptionHandling/ECS_Exception.h"
 #include <bitset>
 #include <cstdint>
 #include <exception>
-#include "../Worms/src/ExceptionHandling/ECS_Exception.h"
 
 #define MAX_COMPONENTS 32
 #define MAX_ENTITIES 50000
@@ -24,4 +24,3 @@ typedef std::bitset<MAX_COMPONENTS> Signature;
 #ifndef ECS_THROW
 #define ECS_THROW(message) throw std::exception(message)
 #endif // !ECS_THROW
-

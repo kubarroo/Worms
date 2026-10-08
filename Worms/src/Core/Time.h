@@ -3,17 +3,17 @@
 
 namespace Time
 {
-	extern double deltaTime;
+extern double deltaTime;
 
-	class Timer
-	{
-	public:
-		Timer();
-		double Reset();
-		double Measure();
+class Timer
+{
+public:
+    Timer();
+    double Reset();
+    double Measure();
 
-	private:
-		uint64_t lastTime = 0;
-		double deltaTime = 0.0;
-	};
+private:
+    uint64_t lastTime = 0;
+    double deltaTime = 0.0;
 };
+}; // namespace Time
