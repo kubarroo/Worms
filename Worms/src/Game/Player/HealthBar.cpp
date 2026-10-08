@@ -1,4 +1,4 @@
-#include <SDL2/SDL_image.h>
+#include <SDL_image.h>
 #include "ECS/World.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Player/HealthBar.h"

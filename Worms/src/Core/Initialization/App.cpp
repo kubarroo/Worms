@@ -1,6 +1,6 @@
 #include <imgui_impl_sdlrenderer2.h>
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_mixer.h>
+#include <SDL_mixer.h>
 #include "Core/Initialization/App.h"
 #include "Core/Input.h"
 #include "Core/Physics/ColliderFactory.h"
@@ -98,7 +98,7 @@ void App::PostRender()
 
 	ImGui::Render();
 	SDL_RenderSetScale( renderer, io->DisplayFramebufferScale.x, io->DisplayFramebufferScale.y );
-	ImGui_ImplSDLRenderer2_RenderDrawData( ImGui::GetDrawData() );
+	ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer);
 	SDL_RenderPresent( renderer );
 }
 

@@ -18,6 +18,7 @@ void Input::UpdateInputsDown( const SDL_Event& ev )
 	case SDL_SCANCODE_SPACE: jump = true; break;
 	case SDL_SCANCODE_E: changeWeapon = 1; break;
 	case SDL_SCANCODE_Q: changeWeapon = -1; break;
+	default: break;
 	}
 }
 
@@ -49,5 +50,6 @@ void Input::UpdateInputsUp( const SDL_Event& ev )
 	case SDL_SCANCODE_E:
 		changeWeapon = 0;
 		break;
+	default: break;
 	}
 }

@@ -2,7 +2,7 @@
 #include <box2d/b2_math.h>
 #include <box2d/b2_math.h>
 #include <optional>
-#include <SDL2/SDL_image.h>
+#include <SDL_image.h>
 #include <span>
 #include <vector>
 

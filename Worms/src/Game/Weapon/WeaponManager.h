@@ -1,7 +1,7 @@
 #pragma once
 #include <map>
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_image.h>
+#include <SDL_image.h>
 #include <vector>
 #include "Core/Audio/Sound.h"
 #include "Core/Input.h"

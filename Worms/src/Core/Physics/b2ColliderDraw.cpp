@@ -39,8 +39,12 @@ void b2ColliderDraw::DrawSolidCircle( const b2Vec2& center, float radius, const 
 
 	for ( int i = 0; i <= RES; i++ )
 	{
-		SDL_Point pixelPoint = { (center.x - camera.X()) * 100 + radius * 100 * cos( i * 2.f * M_PI / RES ),
-								 (center.y - camera.Y()) * 100 + radius * 100 * sin( i * 2.f * M_PI / RES ) };
+		SDL_Point pixelPoint = {
+				static_cast<int>((center.x - camera.X()) * 100
+					+ radius * 100 * cos(i * 2.f * M_PI / RES)),
+				static_cast<int>((center.y - camera.Y()) * 100
+					+ radius * 100 * sin(i * 2.f * M_PI / RES))
+			};
 		SDL_Point screenPoint( SCREEN_WIDTH / 2 + (pixelPoint.x), SCREEN_HEIGHT / 2 - (pixelPoint.y) );
 		points[i] = screenPoint;
 	}

@@ -2,7 +2,7 @@
 #include <bitset>
 #include <cstdint>
 #include <exception>
-#include "../../Worms/src/ExceptionHandling/ECS_Exception.h"
+#include "../Worms/src/ExceptionHandling/ECS_Exception.h"
 
 #define MAX_COMPONENTS 32
 #define MAX_ENTITIES 50000
@@ -15,8 +15,7 @@ typedef std::bitset<MAX_COMPONENTS> Signature;
 #define ECS_VERBOSE 1
 
 #if ECS_VERBOSE
-#include "../../Worms/src/Terminal/Terminal.h"
-extern class Terminal;
+#include "../Worms/src/Terminal/Terminal.h"
 #define LOG(x) Terminal::Get().Log(x, LogLevel::INFO);
 #else
 #define LOG(x)

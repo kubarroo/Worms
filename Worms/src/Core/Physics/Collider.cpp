@@ -1,5 +1,5 @@
-#include "core/Physics/Collider.h"
-#include "core/Physics/ContactManager.h"
+#include "Core/Physics/Collider.h"
+#include "Core/Physics/ContactManager.h"
 
 void Collider::AddOnColliderEnter( std::function<void( b2Contact* )> callback ) const
 {

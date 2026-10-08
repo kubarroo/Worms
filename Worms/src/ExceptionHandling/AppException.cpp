@@ -18,7 +18,7 @@ const char* AppException::what() const noexcept
 	return whatBuffer.c_str();
 }
 
-const inline char* AppException::GetType() const noexcept
+const char* AppException::GetType() const noexcept
 {
 	return "Worms Exception";
 }

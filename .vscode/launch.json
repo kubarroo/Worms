@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Worms",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/Worms/worms.exe",
+      "cwd": "${workspaceFolder}/build/Worms",
+      "args": [],
+      "stopAtEntry": false
+    }
+  ]
+}

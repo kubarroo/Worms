@@ -31,7 +31,7 @@ void Terminal::Render()
 		ImGui::BeginChild( "history", { 0, 140 }, false, ImGuiWindowFlags_HorizontalScrollbar );
 
 		for ( const std::string& line : Lines )
-			ImGui::Text( line.c_str() );
+			ImGui::TextUnformatted(line.c_str());
 
 		if ( ImGui::GetScrollY() >= ImGui::GetScrollMaxY() )
 			ImGui::SetScrollHereY( 0.0f );

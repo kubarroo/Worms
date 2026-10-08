@@ -3,7 +3,7 @@
 #include <box2d/b2_circle_shape.h>
 #include <box2d/b2_fixture.h>
 #include <box2d/b2_world.h>
-#include <SDL2/SDL_image.h>
+#include <SDL_image.h>
 #include "Core/ParticleSystem.h"
 #include "Core/Physics/ColliderFactory.h"
 #include "Core/Physics/ContactManager.h"

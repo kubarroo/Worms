@@ -5,7 +5,7 @@
 #include "ECS/System.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Components.h"
-#include "SDL2/SDL_image.h"
+#include "SDL_image.h"
 
 class ParticleSystem : public GameObject
 {

@@ -58,7 +58,10 @@ void Map::CleanUp()
 SDL_Point Map::GlobalToLocalPos( const Position& mapPos )
 {
 	b2Vec2 localSpace = { bulltetPos.x - mapPos.x, -bulltetPos.y + mapPos.y };
-	SDL_Point point = { localSpace.x * 100, localSpace.y * 100 };
+	SDL_Point point = {
+		static_cast<int>(localSpace.x * 100.f),
+		static_cast<int>(localSpace.y * 100.f)
+	};
 	point.x += mapSize.x / 2;
 	point.y += mapSize.y / 2;
 	return point;

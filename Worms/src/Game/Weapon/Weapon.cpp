@@ -4,7 +4,7 @@
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Tags.h"
 #include "Game/Weapon/Weapon.h"
-#include "SDL2/SDL_image.h"
+#include "SDL_image.h"
 
 Weapon::Weapon( Camera& camera ) : camera( camera )
 {
