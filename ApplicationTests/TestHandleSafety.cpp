@@ -3,6 +3,13 @@
 #include "Game/Systems.h"
 #include <gtest/gtest.h>
 #include <memory>
+#include <type_traits>
+
+static_assert(std::is_default_constructible_v<GameObject>);
+static_assert(!std::is_copy_constructible_v<GameObject>);
+static_assert(!std::is_copy_assignable_v<GameObject>);
+static_assert(!std::is_move_constructible_v<GameObject>);
+static_assert(!std::is_move_assignable_v<GameObject>);
 
 TEST(HandleSafety, EntityZeroIsValidAndCleanupCanBeRepeated)
 {

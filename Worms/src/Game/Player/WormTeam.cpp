@@ -1,35 +1,72 @@
 #include "Game/Player/WormTeam.h"
+#include <algorithm>
+#include <stdexcept>
 
-void WormTeam::AddWorm(Worm* worm)
+void WormTeam::AddWorm(std::unique_ptr<Worm> worm)
 {
-    worms.push_back(worm);
+    try
+    {
+        worms.push_back(std::move(worm));
+    }
+    catch (...)
+    {
+        if (worm)
+        {
+            worm->CleanUp();
+        }
+        throw;
+    }
     if (worms.size() == 1)
+    {
         worms[0]->Activate();
+    }
 }
 
 void WormTeam::RemoveWorm(Worm* worm)
 {
+    auto it = std::find_if(worms.begin(), worms.end(),
+                           [worm](const auto& item) { return item.get() == worm; });
+    if (it == worms.end())
+    {
+        return;
+    }
+
+    const auto index = static_cast<int>(it - worms.begin());
+    const bool wasActive = index == activeWorm;
+
+    (*it)->CleanUp();
+    worms.erase(it);
     dieSound.Play();
 
-    bool needToUpdate = false;
+    if (worms.empty())
+    {
+        activeWorm = 0;
+        return;
+    }
+
+    if (index < activeWorm)
+    {
+        --activeWorm;
+    }
+
     ActiveWormCheck();
-    if (worm == worms[activeWorm])
-        needToUpdate = true;
-
-    worms.erase(std::remove_if(worms.begin(), worms.end(),
-                               [worm](Worm* current) { return worm == current; }));
-
-    if (needToUpdate)
-        ChangeActiveWorm();
+    if (wasActive)
+    {
+        worms[activeWorm]->Activate();
+    }
 }
 
 void WormTeam::ChangeActiveWorm()
 {
     if (worms.empty())
+    {
         return;
+    }
 
     if (worms.size() > activeWorm)
+    {
         worms[activeWorm]->Disactivate();
+    }
 
     activeWorm++;
     ActiveWormCheck();
@@ -39,18 +76,22 @@ void WormTeam::ChangeActiveWorm()
 
 EntityId WormTeam::GetActiveWorm()
 {
+    if (worms.empty())
+    {
+        throw std::logic_error("Cannot get active worm from an empty team");
+    }
     ActiveWormCheck();
     return worms[activeWorm]->GetId();
 }
 
 int WormTeam::Size() const
 {
-    return worms.size();
+    return static_cast<int>(worms.size());
 }
 
 void WormTeam::RenderHealthBars()
 {
-    for (auto worm : worms)
+    for (const auto& worm : worms)
     {
         worm->Render();
     }
@@ -59,20 +100,27 @@ void WormTeam::RenderHealthBars()
 void WormTeam::Update()
 {
     for (auto& worm : worms)
+    {
         worm->Update(wormsToDelete);
+    }
     for (auto worm : wormsToDelete)
     {
-        worm->CleanUp();
         RemoveWorm(worm);
     }
     wormsToDelete.clear();
 }
 
-WormTeam::~WormTeam()
+void WormTeam::CleanUp()
 {
+    wormsToDelete.clear();
+
     for (auto& worm : worms)
-        delete worm;
+    {
+        worm->CleanUp();
+    }
+
     worms.clear();
+    activeWorm = 0;
 }
 
 void WormTeam::ActiveWormCheck()

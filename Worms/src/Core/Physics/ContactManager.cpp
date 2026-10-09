@@ -36,7 +36,7 @@ void ContactManager::endContactFixtureUpdate(b2Fixture* fixture, b2Contact* cont
     if (fixture->GetUserData().pointer != 0)
     {
         PhysicsInfo* info1 = (PhysicsInfo*)fixture->GetUserData().pointer;
-        if (beginEvents.contains(info1->id))
+        if (endEvents.contains(info1->id))
         {
             auto& evts = endEvents[info1->id];
             for (const auto& evt : evts)
@@ -84,17 +84,7 @@ void ContactManager::DeleteEvent(const EntityId entId, const CollisionType type,
 
 void ContactManager::ClearEvent(const EntityId entId, const CollisionType type)
 {
-    auto& evts = GetEvents(type);
-    auto iterator = evts.find(entId);
-    if (iterator == evts.end())
-    {
-        // Throw error
-    }
-    else
-    {
-        auto& vec = evts[entId];
-        vec.clear();
-    }
+    GetEvents(type).erase(entId);
 }
 
 EventMap& ContactManager::GetEvents(const CollisionType type)
@@ -108,4 +98,11 @@ EventMap& ContactManager::GetEvents(const CollisionType type)
     case CollisionType::END:
         return endEvents;
     }
+}
+
+void ContactManager::ClearAll()
+{
+    beginEvents.clear();
+    updateEvents.clear();
+    endEvents.clear();
 }

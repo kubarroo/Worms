@@ -18,7 +18,8 @@ void Weapon::Initialise( SDL_Renderer* newRenderer, World* newWorld )
 
 	Sprite& spriteComponent = world->AddComponent<Sprite>( objectId );
 
-	powerBar = IMG_LoadTexture( renderer, "powerBar.png" );
+	powerBar.reset( IMG_LoadTexture( renderer, "powerBar.png" ) );
+	SDL_CHECK( powerBar.get() );
 }
 
 void Weapon::Update()
@@ -78,7 +79,7 @@ void Weapon::Render()
 	auto& pos = world->GetComponent<Position>( objectId );
 	auto& rot = world->GetComponent<Rotation>( objectId );
 	SDL_Point size;
-	SDL_QueryTexture( powerBar, NULL, NULL, &size.x, &size.y );
+	SDL_QueryTexture( powerBar.get(), NULL, NULL, &size.x, &size.y );
 
 	SDL_Rect slice(
 		0,
@@ -95,5 +96,5 @@ void Weapon::Render()
 	SDL_Point centre( 0, size.y / 2 );
 
 
-	SDL_RenderCopyEx( renderer, powerBar, &slice, &renderQuad, -rot.degree, &centre, SDL_FLIP_NONE );
+	SDL_RenderCopyEx( renderer, powerBar.get(), &slice, &renderQuad, -rot.degree, &centre, SDL_FLIP_NONE );
 }

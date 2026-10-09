@@ -1,5 +1,6 @@
 #pragma once
 #include <map>
+#include <memory>
 #include <SDL2/SDL.h>
 #include <SDL_image.h>
 #include <vector>
@@ -21,14 +22,19 @@ public:
 	void Initialise();
 	void Update();
 	Weapon* GetWeapon() const { return weapon; }
-	~WeaponManager();
+	~WeaponManager() = default;
 private:
+	using TexturePtr = std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>;
+	void LoadTexture(const std::string& path);
+	void LoadSound(const std::string& path);
+	void ApplyCurrentWeapon();
 	SDL_Renderer* renderer;
 	Weapon* weapon = nullptr;
 	int currentWeapon = 0;
-	std::vector<WeaponImpl*> weapons;
-	std::map<std::string, Sound*> sounds;
-	std::map<std::string, SDL_Texture*> textures;
+	bool initialized = false;
+	std::vector<std::unique_ptr<WeaponImpl>> weapons;
+	std::map<std::string, std::unique_ptr<Sound>> sounds;
+	std::map<std::string, TexturePtr> textures;
 
 };
 

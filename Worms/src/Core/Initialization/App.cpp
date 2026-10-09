@@ -8,12 +8,15 @@
 #include <SDL2/SDL.h>
 #include <SDL_mixer.h>
 #include <imgui_impl_sdlrenderer2.h>
+#include <stdexcept>
 
 
 App::App() {}
 
 void App::InitWindow(const std::string& title, const int width, const int height)
 {
+    if (sdlInitialized || imguiContext)
+        throw std::logic_error("App is already initialized");
     InitSDL(title, width, height);
     InitImGui();
 
@@ -23,7 +26,16 @@ void App::InitWindow(const std::string& title, const int width, const int height
 void App::InitSDL(const std::string& title, const int width, const int height)
 {
     // Initialises the SDL video subsystem (as well as the events subsystem).
-    SDL_CALL(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0);
+    try
+    {
+        SDL_CALL(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO));
+    }
+    catch (...)
+    {
+        SDL_Quit();
+        throw;
+    }
+    sdlInitialized = true;
 
     /* Creates a SDL window */
     window = SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width,
@@ -34,14 +46,17 @@ void App::InitSDL(const std::string& title, const int width, const int height)
     SDL_CHECK(renderer);
 
     SDL_CALL(Mix_OpenAudio(22050, MIX_DEFAULT_FORMAT, 2, 4096));
+    audioOpened = true;
 
-    SDL_RenderSetLogicalSize(renderer, width, height);
+    SDL_CALL(SDL_RenderSetLogicalSize(renderer, width, height));
 }
 
 void App::InitImGui()
 {
     IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
+    imguiContext = ImGui::CreateContext();
+    if (!imguiContext)
+        throw std::runtime_error("Could not create ImGui context");
     io = &ImGui::GetIO();
     (void)*io;
     io->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
@@ -51,8 +66,12 @@ void App::InitImGui()
     ImGui::StyleColorsDark();
 
     // Setup Platform/Renderer backends
-    ImGui_ImplSDL2_InitForSDLRenderer(window, renderer);
-    ImGui_ImplSDLRenderer2_Init(renderer);
+    imguiPlatformInitialized = ImGui_ImplSDL2_InitForSDLRenderer(window, renderer);
+    if (!imguiPlatformInitialized)
+        throw std::runtime_error("Could not initialize ImGui SDL2 backend");
+    imguiRendererInitialized = ImGui_ImplSDLRenderer2_Init(renderer);
+    if (!imguiRendererInitialized)
+        throw std::runtime_error("Could not initialize ImGui renderer backend");
 }
 
 void App::Update()
@@ -125,9 +144,41 @@ void App::PreRender()
 
 void App::Clean()
 {
-    ImGui_ImplSDLRenderer2_Shutdown();
-    ImGui_ImplSDL2_Shutdown();
-    SDL_DestroyWindow(window);
+    isRunning = false;
+    if (imguiContext)
+    {
+        auto* previousContext = ImGui::GetCurrentContext();
+        ImGui::SetCurrentContext(imguiContext);
+        if (imguiRendererInitialized)
+        {
+            ImGui_ImplSDLRenderer2_Shutdown();
+            imguiRendererInitialized = false;
+        }
+        if (imguiPlatformInitialized)
+        {
+            ImGui_ImplSDL2_Shutdown();
+            imguiPlatformInitialized = false;
+        }
+        ImGui::DestroyContext(imguiContext);
+        if (previousContext != imguiContext)
+            ImGui::SetCurrentContext(previousContext);
+        imguiContext = nullptr;
+        io = nullptr;
+    }
+    if (audioOpened)
+    {
+        Mix_HaltMusic();
+        Mix_HaltChannel(-1);
+        Mix_CloseAudio();
+        audioOpened = false;
+    }
     SDL_DestroyRenderer(renderer);
-    SDL_Quit();
+    renderer = nullptr;
+    SDL_DestroyWindow(window);
+    window = nullptr;
+    if (sdlInitialized)
+    {
+        SDL_Quit();
+        sdlInitialized = false;
+    }
 }

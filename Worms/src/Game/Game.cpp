@@ -8,8 +8,10 @@
 #include "Terminal/Terminal.h"
 #include "imgui_impl_sdl2.h"
 #include <SDL2/SDL.h>
+#include <SDL_mixer.h>
 #include <imgui_impl_sdlrenderer2.h>
-
+#include <algorithm>
+#include <iterator>
 
 void Game::InitWindow(const std::string& title, const int width, const int height)
 {
@@ -24,18 +26,23 @@ void Game::InitWindow(const std::string& title, const int width, const int heigh
     world->RegisterSystem<ParticleUpdater>();
     auto camera = std::make_unique<Camera>();
     auto cameraPtr = camera.get();
-    world->RegisterSystem<SpriteRenderer>(renderer, *camera);
+    GameObject::activeObjs.emplace_back(std::move(camera));
+    world->RegisterSystem<SpriteRenderer>(renderer, *cameraPtr);
 
     physicsWorld = std::make_unique<b2World>(b2Vec2(0, -9.811f));
-    setUpDebugDraw(camera);
+    setUpDebugDraw(*cameraPtr);
     ColliderFactory::Get().Init(physicsWorld.get());
-    weaponManager = std::make_unique<WeaponManager>(renderer, *camera);
-    wormManager = std::make_unique<WormManager>(renderer, world.get(), physicsWorld.get(), *camera,
+    weaponManager = std::make_unique<WeaponManager>(renderer, *cameraPtr);
+    wormManager = std::make_unique<WormManager>(renderer, world.get(), physicsWorld.get(), *cameraPtr,
                                                 *weaponManager->GetWeapon());
     wormManager->CreateTeam(4);
     wormManager->CreateTeam(4);
     GameObject::activeObjs.emplace_back(std::make_unique<Map>(physicsWorld.get()));
-    GameObject::activeObjs.emplace_back(std::move(camera));
+
+    // Keep the camera's update/render order while owning it throughout initialization.
+    auto cameraIt = std::find_if(GameObject::activeObjs.begin(), GameObject::activeObjs.end(),
+                                [cameraPtr](const auto& object) { return object.get() == cameraPtr; });
+    std::rotate(cameraIt, std::next(cameraIt), GameObject::activeObjs.end());
 
     for (auto& gameObject : GameObject::activeObjs)
         gameObject->Initialise(renderer, world.get());
@@ -48,9 +55,9 @@ void Game::InitWindow(const std::string& title, const int width, const int heigh
     music->Play();
 }
 
-void Game::setUpDebugDraw(std::unique_ptr<Camera, std::default_delete<Camera>>& camera)
+void Game::setUpDebugDraw(Camera& camera)
 {
-    b2DebugDraw = std::make_unique<b2ColliderDraw>(renderer, *camera);
+    b2DebugDraw = std::make_unique<b2ColliderDraw>(renderer, camera);
     physicsWorld->SetDebugDraw(b2DebugDraw.get());
     physicsWorld->SetContactListener(&ContactManager::Get());
 }
@@ -112,4 +119,55 @@ void Game::Render()
 
     world->Render();
     wormManager->RenderHealthBars();
+}
+
+void Game::Clean()
+{
+    if (audioOpened)
+    {
+        Mix_HaltMusic();
+        Mix_HaltChannel(-1);
+    }
+
+    if (physicsWorld)
+    {
+        physicsWorld->SetContactListener(nullptr);
+        physicsWorld->SetDebugDraw(nullptr);
+    }
+
+    if (wormManager)
+    {
+        wormManager->CleanUp();
+    }
+
+    for (auto& object : GameObject::activeObjs)
+    {
+        if (object)
+        {
+            object->CleanUp();
+        }
+    }
+    for (auto& object : GameObject::objsToAdd)
+    {
+        if (object)
+        {
+            object->CleanUp();
+        }
+    }
+
+    ContactManager::Get().ClearAll();
+
+    wormManager.reset();
+    GameObject::objsToDelete.clear();
+    GameObject::objsToAdd.clear();
+    GameObject::activeObjs.clear();
+
+    weaponManager.reset();
+    music.reset();
+    b2DebugDraw.reset();
+    ColliderFactory::Get().Init(nullptr);
+    physicsWorld.reset();
+    world.reset();
+
+    App::Clean();
 }

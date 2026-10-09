@@ -10,7 +10,7 @@
 #include "box2d/b2_polygon_shape.h"
 #include "box2d/b2_world.h"
 #include <memory>
-
+#include <algorithm>
 
 Map::Map(b2World* physicsWorld) : physicsWorld(physicsWorld) {}
 
@@ -28,32 +28,60 @@ void Map::Initialise(SDL_Renderer* renderer, World* world)
     if (physTex.has_value())
     {
         auto& rb = world->AddComponent<RigidBody>(objectId);
-        auto texture = SDL_CreateTextureFromSurface(renderer, physTex.value().surface);
-        SDL_QueryTexture(texture, NULL, NULL, &mapSize.x, &mapSize.y);
-        CreateNewColliders();
+        std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)> texture(
+            SDL_CreateTextureFromSurface(renderer, physTex->surface), &SDL_DestroyTexture);
+        SDL_CHECK(texture.get());
+        SDL_QueryTexture(texture.get(), NULL, NULL, &mapSize.x, &mapSize.y);
+        world->AddComponent<Sprite>(objectId, {texture.get()});
+        texture.release();
 
-        world->AddComponent<Sprite>(objectId, {texture});
+        CreateNewColliders();
     }
 }
 
 void Map::Update()
 {
-    if (!destroyed || physicsWorld->IsLocked())
+    if (!HasEntity() || !physTex || !destroyed || physicsWorld->IsLocked())
         return;
-    destroyed = false;
 
     Position mapPos = world->GetComponent<Position>(objectId);
     DestroyMapAtLocalPoint(GlobalToLocalPos(mapPos));
+    std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)> texture(
+        SDL_CreateTextureFromSurface(renderer, physTex->surface), &SDL_DestroyTexture);
+    SDL_CHECK(texture.get());
+    auto& sprite = world->GetComponent<Sprite>(objectId);
     CreateNewColliders();
 
-    auto texture = SDL_CreateTextureFromSurface(renderer, physTex.value().surface);
-    SDL_DestroyTexture(world->GetComponent<Sprite>(objectId).texture);
-    world->GetComponent<Sprite>(objectId).texture = texture;
+    SDL_DestroyTexture(sprite.texture);
+    sprite.texture = texture.release();
+    destroyed = false;
 }
 
 void Map::CleanUp()
 {
-    SDL_DestroyTexture(world->GetComponent<Sprite>(objectId).texture);
+    if (!HasEntity())
+    {
+        return;
+    }
+    ContactManager::Get().ClearEvent(objectId, CollisionType::BEGIN);
+    auto rb = world->TryGetComponent<RigidBody>(objectId);
+    if (rb && rb->get().body)
+    {
+        physicsWorld->DestroyBody(rb->get().body);
+        rb->get().body = nullptr;
+    }
+    auto sprite = world->TryGetComponent<Sprite>(objectId);
+    if (sprite)
+    {
+        SDL_DestroyTexture(sprite->get().texture);
+        sprite->get().texture = nullptr;
+    }
+    if (physTex)
+    {
+        SDL_FreeSurface(physTex->surface);
+        physTex.reset();
+    }
+    GameObject::CleanUp();
 }
 
 SDL_Point Map::GlobalToLocalPos(const Position& mapPos)
@@ -110,26 +138,52 @@ void Map::CreateNewColliders()
     std::vector<std::vector<b2Vec2>> physPoints = CreateContour();
     SimplifyContour(physPoints);
 
-    physTex->points = physPoints;
+    std::erase_if(physPoints, [](const auto& points)
+    {
+        if (points.size() < 3) return true;
+        for (std::size_t i = 0; i < points.size(); ++i)
+            if (b2DistanceSquared(points[i], points[(i + 1) % points.size()]) <
+                b2_linearSlop * b2_linearSlop)
+                return true;
+        return false;
+    });
 
-    if (world->GetComponent<RigidBody>(objectId).body != NULL)
-        physicsWorld->DestroyBody(world->GetComponent<RigidBody>(objectId).body);
+    auto& body = world->GetComponent<RigidBody>(objectId).body;
+    b2Body* replacement = nullptr;
+    if (!physPoints.empty())
+    {
+        b2ChainShape shape;
+        shape.CreateLoop(physPoints.front().data(), static_cast<int32>(physPoints.front().size()));
+        const auto& pos = world->GetComponent<Position>(objectId);
+        auto collider = ColliderFactory::Get().CreateStaticBody(&shape, {pos.x, pos.y}, physicsInfo);
+        replacement = collider.GetBody();
+        try
+        {
+            GenerateFixturesForAllContours(collider, physPoints);
+        }
+        catch (...)
+        {
+            physicsWorld->DestroyBody(replacement);
+            throw;
+        }
+    }
 
-    b2ChainShape shape;
-    shape.CreateLoop(&physTex->points[0][0], physTex->points[0].size());
-    auto& pos = world->GetComponent<Position>(objectId);
-    auto collider = ColliderFactory::Get().CreateStaticBody(&shape, {pos.x, pos.y}, physicsInfo);
-    GenerateFixturesForAllContours(collider);
-
-    world->GetComponent<RigidBody>(objectId).body = collider.GetBody();
+    if (body)
+    {
+        physicsWorld->DestroyBody(body);
+        body = nullptr;
+    }
+    body = replacement;
+    physTex->points = std::move(physPoints);
 }
 
-void Map::GenerateFixturesForAllContours(Collider& collider)
+void Map::GenerateFixturesForAllContours(Collider& collider,
+                                       const std::vector<std::vector<b2Vec2>>& contours)
 {
     b2ChainShape shape;
-    for (int i = 1; i < physTex->points.size(); i++)
+    for (std::size_t i = 1; i < contours.size(); i++)
     {
-        shape.CreateLoop(&physTex.value().points[i][0], physTex.value().points[i].size());
+        shape.CreateLoop(contours[i].data(), static_cast<int32>(contours[i].size()));
         ColliderFactory::Get().CreateStaticFixture(collider.GetBody(), &shape, physicsInfo);
         shape.Clear();
     }
@@ -155,6 +209,8 @@ void Map::SimplifyContour(std::vector<std::vector<b2Vec2>>& physPoints)
 {
     for (auto& points : physPoints)
     {
+        if (points.size() < 3)
+            continue;
         points = DouglasPeucker(points, 0.05);
         for (auto& point : points)
         {

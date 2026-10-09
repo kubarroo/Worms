@@ -7,13 +7,22 @@ HealthBar::HealthBar(SDL_Renderer* renderer, World* world, EntityId newParentId,
                      const Camera& camera, int health, SDL_Texture* texture)
     : camera(camera)
 {
-    Initialise(renderer, world);
+    try
+    {
+        SDL_CHECK(texture);
+        Initialise(renderer, world);
 
-    world->AddComponent<Position>(objectId, {0, 0});
-    world->AddComponent<Health>(objectId, {100, 100});
-    world->AddComponent<Follow>(objectId, {newParentId, 0.0, 0.3});
-    healthBar = texture;
-    SDL_CHECK(healthBar);
+        world->AddComponent<Position>(objectId, {0, 0});
+        world->AddComponent<Health>(objectId, {100, 100});
+        world->AddComponent<Follow>(objectId, {newParentId, 0.0, 0.3});
+        healthBar = texture;
+        SDL_CHECK(healthBar);
+    }
+    catch (...)
+    {
+        CleanUp();
+        throw;
+    }
 }
 
 void HealthBar::Render()

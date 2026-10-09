@@ -12,50 +12,60 @@
 Worm::Worm(SDL_Renderer* newRenderer, World* newWorld, b2World* physicsWorld, const Camera& camera,
            SDL_Texture* texture)
 {
-    Initialise(newRenderer, newWorld);
-    static float posX = -2.f;
-    posX += 1.f;
-    auto& pos = world->AddComponent<Position>(objectId, {posX, 2});
+    try
+    {
+        Initialise(newRenderer, newWorld);
+        static float posX = -2.f;
+        posX += 1.f;
+        auto& pos = world->AddComponent<Position>(objectId, {posX, 2});
 
-    physicsInfo.tag = PhysicsTag::WORM;
-    physicsInfo.id = objectId;
+        physicsInfo.tag = PhysicsTag::WORM;
+        physicsInfo.id = objectId;
 
-    ContactManager::Get().AddEvent(objectId, CollisionType::BEGIN,
-                                   [&](b2Contact* contact)
-                                   {
-                                       auto entId =
-                                           GetEntityWithTag(contact, PhysicsTag::DESTRUCTION_FIELD);
-                                       if (entId.has_value())
-                                           healthBar->TakeDamage(40);
-                                   });
+        ContactManager::Get().AddEvent(objectId, CollisionType::BEGIN,
+                                       [&](b2Contact* contact)
+                                       {
+                                           auto entId = GetEntityWithTag(
+                                               contact, PhysicsTag::DESTRUCTION_FIELD);
+                                           if (entId.has_value())
+                                               healthBar->TakeDamage(40);
+                                       });
 
-    groundedId = world->CreateEntity();
-    hasGroundedEntity = true;
-    groundedPhysicsInfo.tag = PhysicsTag::GROUNDED;
-    groundedPhysicsInfo.id = groundedId;
+        groundedId = world->CreateEntity();
+        hasGroundedEntity = true;
+        groundedPhysicsInfo.tag = PhysicsTag::GROUNDED;
+        groundedPhysicsInfo.id = groundedId;
 
-    Sprite& spriteComponent = world->AddComponent<Sprite>(objectId);
-    spriteComponent.texture = IMG_LoadTexture(renderer, "worms.png");
-    SDL_CHECK(spriteComponent.texture);
+        Sprite& spriteComponent = world->AddComponent<Sprite>(objectId);
+        spriteTexture.reset(IMG_LoadTexture(renderer, "worms.png"));
+        SDL_CHECK(spriteTexture.get());
+        spriteComponent.texture = spriteTexture.get();
 
-    b2PolygonShape shape;
+        b2PolygonShape shape;
 
-    shape.SetAsBox(0.07, 0.1);
-    b2PolygonShape groundShape;
-    groundShape.SetAsBox(0.075, 0.07, {0.f, -0.08f}, 0.f);
+        shape.SetAsBox(0.07, 0.1);
+        b2PolygonShape groundShape;
+        groundShape.SetAsBox(0.075, 0.07, {0.f, -0.08f}, 0.f);
 
-    collider = std::make_unique<Collider>(
-        ColliderFactory::Get().CreateDynamicBody(&shape, {pos.x, pos.y}, physicsInfo));
-    collider->FreezeRotation();
-    ColliderFactory::Get().CreateTriggerFixture(collider->GetBody(), &groundShape,
-                                                groundedPhysicsInfo);
-    ContactManager::Get().AddEvent(groundedId, CollisionType::BEGIN,
-                                   [&](b2Contact*) { grounded = true; });
-    ContactManager::Get().AddEvent(groundedId, CollisionType::END,
-                                   [&](b2Contact*) { grounded = false; });
+        collider = std::make_unique<Collider>(
+            ColliderFactory::Get().CreateDynamicBody(&shape, {pos.x, pos.y}, physicsInfo));
+        collider->FreezeRotation();
+        ColliderFactory::Get().CreateTriggerFixture(collider->GetBody(), &groundShape,
+                                                    groundedPhysicsInfo);
+        ContactManager::Get().AddEvent(groundedId, CollisionType::BEGIN,
+                                       [&](b2Contact*) { grounded = true; });
+        ContactManager::Get().AddEvent(groundedId, CollisionType::END,
+                                       [&](b2Contact*) { grounded = false; });
 
-    healthBar = std::make_unique<HealthBar>(newRenderer, newWorld, objectId, camera, 100, texture);
-    world->AddComponent<RigidBody>(objectId, {collider->GetBody()});
+        healthBar =
+            std::make_unique<HealthBar>(newRenderer, newWorld, objectId, camera, 100, texture);
+        world->AddComponent<RigidBody>(objectId, {collider->GetBody()});
+    }
+    catch (...)
+    {
+        CleanUp();
+        throw;
+    }
 }
 
 void Worm::Update(std::vector<Worm*>& wormsToDelete)
@@ -135,6 +145,7 @@ void Worm::CleanUp()
         healthBar->CleanUp();
     }
     GameObject::CleanUp();
+    spriteTexture.reset();
 }
 
 void Worm::Render()

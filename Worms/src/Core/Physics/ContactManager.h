@@ -6,7 +6,6 @@
 #include <functional>
 #include <unordered_map>
 
-
 enum CollisionType
 {
     BEGIN,
@@ -36,6 +35,8 @@ public:
     void AddEvent(const EntityId entId, const CollisionType, std::function<void(b2Contact*)>);
     void DeleteEvent(const EntityId entId, const CollisionType, std::function<void(b2Contact*)>);
     void ClearEvent(const EntityId entId, const CollisionType);
+
+    void ClearAll();
 
 private:
     ContactManager() = default;

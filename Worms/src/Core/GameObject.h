@@ -9,6 +9,12 @@
 class GameObject
 {
 public:
+    GameObject() = default;
+    GameObject(const GameObject&) = delete;
+    GameObject& operator=(const GameObject&) = delete;
+    GameObject(GameObject&&) = delete;
+    GameObject& operator=(GameObject&&) = delete;
+
     virtual void Initialise(SDL_Renderer* newRenderer, World* newWorld);
     virtual void Update() {};
     virtual void Render() {};

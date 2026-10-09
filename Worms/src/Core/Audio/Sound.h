@@ -6,6 +6,8 @@ class Sound
 {
 public:
     Sound(const std::string& fileName);
+    Sound(const Sound&) = delete;
+    Sound& operator=(const Sound&) = delete;
     void Play(unsigned int times = 1);
     ~Sound();
 

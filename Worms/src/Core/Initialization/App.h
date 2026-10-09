@@ -32,8 +32,9 @@ public:
     virtual ~App() = default;
 
 protected:
-    SDL_Window* window = NULL;
-    SDL_Renderer* renderer = NULL;
+    SDL_Window* window = nullptr;
+    SDL_Renderer* renderer = nullptr;
+    bool audioOpened = false;
     std::unique_ptr<World> world;
     std::unique_ptr<b2World> physicsWorld;
     std::unique_ptr<b2ColliderDraw> b2DebugDraw;
@@ -41,7 +42,11 @@ protected:
 private:
     void InitSDL(const std::string& title, const int width, const int height);
     void InitImGui();
-    ImGuiIO* io = 0;
+    ImGuiIO* io = nullptr;
+    ImGuiContext* imguiContext = nullptr;
+    bool sdlInitialized = false;
+    bool imguiPlatformInitialized = false;
+    bool imguiRendererInitialized = false;
 
     bool toggleColliders = false;
     bool isRunning = false;

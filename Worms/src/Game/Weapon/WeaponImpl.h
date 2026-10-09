@@ -3,6 +3,7 @@
 
 struct WeaponImpl
 {
+	virtual ~WeaponImpl() = default;
 	std::string weaponTexturePath = "placeHolderWeapon.png";
 	std::string projectileTexturePath = "placeHolderBullet.png";;
 	std::string explosionSound;

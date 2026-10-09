@@ -21,12 +21,14 @@ public:
     void DestroyMapAtLocalPoint(SDL_Point point);
 
 private:
+    friend struct MapTestAccess;
     void DestroyMap(b2Contact* contact);
     float Distance(const float x1, const float y1, const float x2, const float y2);
 
     void CreateNewColliders();
 
-    void GenerateFixturesForAllContours(Collider& collider);
+    void GenerateFixturesForAllContours(Collider& collider,
+                                        const std::vector<std::vector<b2Vec2>>& contours);
 
     std::vector<std::vector<b2Vec2>> CreateContour();
 
@@ -38,7 +40,7 @@ private:
     Position bulltetPos;
     PhysicsInfo physicsInfo;
     std::optional<PhysicTexture> physTex;
-    float destructionRadius;
+    float destructionRadius = 0;
 
     SDL_Point mapSize{};
 };

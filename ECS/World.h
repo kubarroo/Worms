@@ -16,6 +16,11 @@ public:
     EntityId CreateEntity();
     void DestroyEntity(const EntityId ent);
 
+    uint16_t GetAmountOfAvailableEntities() const
+    {
+        return entManager.GetAmountOfAvailableEntities();
+    }
+
     EntityId CopyEntity(const EntityId toCopy);
 
     template <typename Component> void RegisterComponent();

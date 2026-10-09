@@ -2,7 +2,7 @@
 #include "Game/Player/WormTeam.h"
 #include "Game/Weapon/Weapon.h"
 #include <box2d/b2_world.h>
-
+#include <memory>
 
 class WormManager
 {
@@ -16,20 +16,28 @@ public:
     void DeleteTeam(WormTeam* team);
     EntityId GetActiveWormId()
     {
+        if (teams.empty())
+        {
+            throw std::logic_error("No active team");
+        }
+
+        ActiveTeamCheck();
         return teams[activeTeam]->GetActiveWorm();
     }
     void RenderHealthBars();
     void Update();
+    void CleanUp();
 
-    ~WormManager();
+    ~WormManager() = default;
 
 private:
-    void ActiveWormCheck();
+    void ActiveTeamCheck();
     void ChangeTeam();
     void ChangeActiveWorm();
 
-    std::vector<WormTeam*> teams;
+    std::vector<std::unique_ptr<WormTeam>> teams;
     int activeTeam = 0;
+    bool nextTeamAlreadySelected = false;
 
     SDL_Renderer* renderer;
     World* world;

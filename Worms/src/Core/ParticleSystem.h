@@ -7,7 +7,6 @@
 #include "SDL_image.h"
 #include <random>
 
-
 class ParticleSystem : public GameObject
 {
 public:
@@ -26,6 +25,7 @@ private:
     int amountOfParticles;
     float timer = 0.f;
     float length = 5.f;
-    float progress;
+    float progress = 0.f;
     std::vector<EntityId> particles;
+    SDL_Texture* texture = nullptr;
 };

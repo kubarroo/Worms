@@ -37,6 +37,7 @@ int main(int argc, char** argv)
 
     std::unique_ptr<App> game = std::make_unique<Game>();
     Time::Timer timer{};
+    int exitCode = 0;
 
     try
     {
@@ -58,13 +59,13 @@ int main(int argc, char** argv)
                 Terminal::Get().Log(e.what(), LogLevel::ERROR);
             }
         }
-
-        game->Clean();
     }
     catch (std::exception& e)
     {
+        exitCode = 1;
         Terminal::Get().Log(e.what(), LogLevel::ERROR);
     }
 
-    return 0;
+    game->Clean();
+    return exitCode;
 }
