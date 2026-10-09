@@ -58,12 +58,21 @@ int main(int argc, char** argv)
             {
                 Terminal::Get().Log(e.what(), LogLevel::ERROR);
             }
+            catch (...)
+            {
+                Terminal::Get().Log("Unknown exception during game update", LogLevel::ERROR);
+            }
         }
     }
     catch (std::exception& e)
     {
         exitCode = 1;
         Terminal::Get().Log(e.what(), LogLevel::ERROR);
+    }
+    catch (...)
+    {
+        exitCode = 1;
+        Terminal::Get().Log("Unknown exception during game initialization", LogLevel::ERROR);
     }
 
     game->Clean();

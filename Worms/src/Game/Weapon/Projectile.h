@@ -34,6 +34,7 @@ private:
 	float startPosX, startPosY, startVelX, startVelY;
 
 	bool createSensor = false;
+    SubscriptionId collisionSubscription = 0;
 	PhysicsInfo physicsInfo;
 	PhysicsInfo sensorInfo;
 	b2Fixture* fixture = nullptr;

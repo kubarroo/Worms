@@ -26,6 +26,9 @@ public:
     bool IsGrounded() const;
 
 private:
+    SubscriptionId damageSubscription = 0;
+    SubscriptionId groundedBeginSubscription = 0;
+    SubscriptionId groundedEndSubscription = 0;
     Sound jumpSound{"jump.wav"};
     std::unique_ptr<HealthBar> healthBar;
     std::unique_ptr<Collider> collider = NULL;

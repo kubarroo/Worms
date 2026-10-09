@@ -39,7 +39,8 @@ void Projectile::Update()
 void Projectile::CleanUp()
 {
 	if ( !HasEntity() ) return;
-	ContactManager::Get().ClearEvent( objectId, CollisionType::BEGIN );
+    ContactManager::Get().RemoveEvent(collisionSubscription);
+    collisionSubscription = 0;
 	if ( collider )
 	{
 		collider->GetBody()->GetWorld()->DestroyBody( collider->GetBody() );
@@ -52,7 +53,8 @@ void Projectile::CleanUp()
 
 void Projectile::onCollision( b2Contact* constact )
 {
-	ContactManager::Get().DeleteEvent( objectId, CollisionType::BEGIN, std::bind( &Projectile::onCollision, this, std::placeholders::_1 ) );
+    ContactManager::Get().RemoveEvent(collisionSubscription);
+    collisionSubscription = 0;
 	if ( collisionSound ) collisionSound->Play();
 	if ( params.explosionOffset == 0 )
 		createSensor = true;
@@ -85,7 +87,8 @@ void Projectile::Initialise( SDL_Renderer* newRenderer, World* newWorld )
 	rigidBody->body->GetFixtureList()[0].SetRestitution( params.bounciness );
 	rigidBody->body->SetGravityScale( params.gravityScale );
 
-	ContactManager::Get().AddEvent( objectId, CollisionType::BEGIN, std::bind( &Projectile::onCollision, this, std::placeholders::_1 ) );
+    collisionSubscription = ContactManager::Get().AddEvent(
+        objectId, CollisionType::BEGIN, std::bind(&Projectile::onCollision, this, std::placeholders::_1));
 
 	if ( camera ) camera->ChangeTarget( objectId );
 }

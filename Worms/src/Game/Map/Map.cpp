@@ -23,7 +23,7 @@ void Map::Initialise(SDL_Renderer* renderer, World* world)
     world->AddComponent<Position>(objectId, {1.5f, -2.f});
 
     physTex = IMG_LoadPhysicTexture(renderer, "map.png");
-    ContactManager::Get().AddEvent(objectId, CollisionType::BEGIN,
+    destructionSubscription = ContactManager::Get().AddEvent(objectId, CollisionType::BEGIN,
                                    std::bind(&Map::DestroyMap, this, std::placeholders::_1));
     if (physTex.has_value())
     {
@@ -63,7 +63,8 @@ void Map::CleanUp()
     {
         return;
     }
-    ContactManager::Get().ClearEvent(objectId, CollisionType::BEGIN);
+    ContactManager::Get().RemoveEvent(destructionSubscription);
+    destructionSubscription = 0;
     auto rb = world->TryGetComponent<RigidBody>(objectId);
     if (rb && rb->get().body)
     {

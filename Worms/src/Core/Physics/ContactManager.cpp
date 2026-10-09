@@ -1,108 +1,137 @@
 #include "Core/Physics/ContactManager.h"
 #include "Game/Tags.h"
+#include <algorithm>
+#include <stdexcept>
+#include <utility>
 
-void ContactManager::BeginContact(b2Contact* contact)
+void ContactManager::BeginContact(b2Contact* contact) noexcept
 {
-    beginContactFixtureUpdate(contact->GetFixtureA(), contact);
-    beginContactFixtureUpdate(contact->GetFixtureB(), contact);
+    HandleContact(contact, BEGIN);
 }
 
-void ContactManager::EndContact(b2Contact* contact)
+void ContactManager::EndContact(b2Contact* contact) noexcept
 {
-    endContactFixtureUpdate(contact->GetFixtureA(), contact);
-    endContactFixtureUpdate(contact->GetFixtureB(), contact);
+    HandleContact(contact, END);
 }
 
-void ContactManager::beginContactFixtureUpdate(b2Fixture* fixture, b2Contact* contact)
+void ContactManager::HandleContact(b2Contact* contact, CollisionType type) noexcept
 {
-    if (fixture->GetUserData().pointer != 0)
+    try
     {
-        PhysicsInfo* info1 = (PhysicsInfo*)fixture->GetUserData().pointer;
+        const auto first = Pending(contact->GetFixtureA(), type);
+        const auto second = Pending(contact->GetFixtureB(), type);
+        Dispatch(first, contact);
+        Dispatch(second, contact);
+    }
+    catch (...)
+    {
+        if (!pendingException) pendingException = std::current_exception();
+    }
+}
 
-        // if ( fixture->IsSensor() && updateEvents.contains( info1->id ) )
-        //	updatableSensors.push_back( std::make_pair( info1->id, contact ) );
+CollisionEvent ContactManager::Pending(b2Fixture* fixture, CollisionType type)
+{
+    if (!fixture->GetUserData().pointer) return {};
+    const auto* info = reinterpret_cast<const PhysicsInfo*>(fixture->GetUserData().pointer);
+    auto& events = GetEvents(type);
+    auto found = events.find(info->id);
+    if (found == events.end()) return {};
+    return found->second;
+}
 
-        if (beginEvents.contains(info1->id))
+void ContactManager::Dispatch(const CollisionEvent& pending, b2Contact* contact)
+{
+    for (auto id : pending)
+    {
+        auto current = subscriptions.find(id);
+        if (current == subscriptions.end()) continue;
+        // Keep the executing callable alive if it removes its own registration.
+        auto subscription = current->second;
+        try
         {
-            auto& evts = beginEvents[info1->id];
-            for (const auto& evt : evts)
-                evt(contact);
+            subscription->callback(contact);
+        }
+        catch (...)
+        {
+            if (!pendingException) pendingException = std::current_exception();
         }
     }
 }
 
-void ContactManager::endContactFixtureUpdate(b2Fixture* fixture, b2Contact* contact)
+void ContactManager::Update() {}
+
+std::exception_ptr ContactManager::TakePendingException() noexcept
 {
-    if (fixture->GetUserData().pointer != 0)
-    {
-        PhysicsInfo* info1 = (PhysicsInfo*)fixture->GetUserData().pointer;
-        if (endEvents.contains(info1->id))
-        {
-            auto& evts = endEvents[info1->id];
-            for (const auto& evt : evts)
-                evt(contact);
-        }
-    }
+    return std::exchange(pendingException, nullptr);
 }
 
-void ContactManager::Update()
+void ContactManager::RethrowPendingException()
 {
-    // for ( auto [id, contact] : updatableSensors )
-    //	for ( auto evt : updateEvents[id] )
-    //		evt( contact );
+    if (auto error = TakePendingException()) std::rethrow_exception(error);
 }
 
-void ContactManager::AddEvent(const EntityId entId, const CollisionType type,
-                              std::function<void(b2Contact*)> evt)
+SubscriptionId ContactManager::AddEvent(EntityId entity, CollisionType type,
+                                        CollisionCallback callback)
 {
     auto& events = GetEvents(type);
-    auto iterator = events.find(entId);
-    if (iterator == events.end())
+    if (!callback) throw std::invalid_argument("Collision callback is empty");
+    if (!nextSubscription) throw std::overflow_error("Collision subscription IDs exhausted");
+    const auto id = nextSubscription++;
+    subscriptions.emplace(id, std::make_shared<Subscription>(
+        Subscription{entity, type, std::move(callback)}));
+    try
     {
-        events[entId].push_back(evt);
+        events[entity].push_back(id);
     }
+    catch (...)
+    {
+        subscriptions.erase(id);
+        auto found = events.find(entity);
+        if (found != events.end() && found->second.empty()) events.erase(found);
+        throw;
+    }
+    return id;
 }
 
-void ContactManager::DeleteEvent(const EntityId entId, const CollisionType type,
-                                 std::function<void(b2Contact*)> evt)
+bool ContactManager::RemoveEvent(SubscriptionId id)
+{
+    auto found = subscriptions.find(id);
+    if (found == subscriptions.end()) return false;
+    auto& events = GetEvents(found->second->type);
+    auto bucket = events.find(found->second->entity);
+    if (bucket != events.end())
+    {
+        std::erase(bucket->second, id);
+        if (bucket->second.empty()) events.erase(bucket);
+    }
+    subscriptions.erase(found);
+    return true;
+}
+
+void ContactManager::ClearEvent(EntityId entity, CollisionType type)
 {
     auto& events = GetEvents(type);
-    auto iterator = events.find(entId);
-    if (iterator == events.end())
-    {
-        // Throw error
-    }
-    else
-    {
-        auto& vec = events[entId];
-        std::erase_if(vec, [evt](const std::function<void(b2Contact*)>& other)
-                      { return *(long*)(char*)&evt == *(long*)(char*)&other; });
-        if (vec.size() == 0)
-            events.erase(entId);
-    }
+    auto found = events.find(entity);
+    if (found == events.end()) return;
+    for (auto id : found->second) subscriptions.erase(id);
+    events.erase(found);
 }
 
-void ContactManager::ClearEvent(const EntityId entId, const CollisionType type)
-{
-    GetEvents(type).erase(entId);
-}
-
-EventMap& ContactManager::GetEvents(const CollisionType type)
+EventMap& ContactManager::GetEvents(CollisionType type)
 {
     switch (type)
     {
-    case CollisionType::BEGIN:
-        return beginEvents;
-    case CollisionType::WHILE_SENSOR_ONLY:
-        return updateEvents;
-    case CollisionType::END:
-        return endEvents;
+    case BEGIN: return beginEvents;
+    case END: return endEvents;
+    case WHILE_SENSOR_ONLY:
+        throw std::invalid_argument("Continuous sensor callbacks are not implemented");
+    default: throw std::invalid_argument("Invalid collision type");
     }
 }
 
 void ContactManager::ClearAll()
 {
     beginEvents.clear();
-    updateEvents.clear();
     endEvents.clear();
+    subscriptions.clear();
 }

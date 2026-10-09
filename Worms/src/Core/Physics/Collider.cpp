@@ -1,34 +1,25 @@
 #include "Core/Physics/Collider.h"
 #include "Core/Physics/ContactManager.h"
+#include <utility>
 
-void Collider::AddOnColliderEnter(std::function<void(b2Contact*)> callback) const
+SubscriptionId Collider::AddOnColliderEnter(CollisionCallback callback) const
 {
-    ContactManager::Get().AddEvent(id, CollisionType::BEGIN, callback);
+    return ContactManager::Get().AddEvent(id, CollisionType::BEGIN, std::move(callback));
 }
 
-// void Collider::AddOnCollider( std::function<void( b2Contact* )> callback ) const
-//{
-//	ContactManager::Get().AddEvent( id, CollisionType::WHILE, callback );
-// }
-
-void Collider::AddOnColliderExit(std::function<void(b2Contact*)> callback) const
+SubscriptionId Collider::AddOnColliderExit(CollisionCallback callback) const
 {
-    ContactManager::Get().AddEvent(id, CollisionType::END, callback);
+    return ContactManager::Get().AddEvent(id, CollisionType::END, std::move(callback));
 }
 
-void Collider::RemoveOnColliderEnter(std::function<void(b2Contact*)> callback) const
+bool Collider::RemoveOnColliderEnter(SubscriptionId subscription) const
 {
-    ContactManager::Get().DeleteEvent(id, CollisionType::BEGIN, callback);
+    return ContactManager::Get().RemoveEvent(subscription);
 }
 
-// void Collider::RemoveOnCollider( std::function<void( b2Contact* )> callback ) const
-//{
-//	ContactManager::Get().DeleteEvent( id, CollisionType::WHILE, callback );
-// }
-
-void Collider::RemoveOnColliderExit(std::function<void(b2Contact*)> callback) const
+bool Collider::RemoveOnColliderExit(SubscriptionId subscription) const
 {
-    ContactManager::Get().DeleteEvent(id, CollisionType::END, callback);
+    return ContactManager::Get().RemoveEvent(subscription);
 }
 
 void Collider::ClearOnColliderEnter() const

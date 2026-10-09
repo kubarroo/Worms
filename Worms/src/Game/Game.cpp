@@ -13,6 +13,28 @@
 #include <algorithm>
 #include <iterator>
 
+namespace
+{
+void ReportContactErrorDuringCleanup() noexcept
+{
+    auto error = ContactManager::Get().TakePendingException();
+    if (!error) return;
+    try
+    {
+        try { std::rethrow_exception(error); }
+        catch (const std::exception& exception)
+        {
+            Terminal::Get().Log(std::string("Collision callback failed: ") + exception.what(), ERROR);
+        }
+        catch (...)
+        {
+            Terminal::Get().Log("Collision callback failed with an unknown exception", ERROR);
+        }
+    }
+    catch (...) {} // Logging must not interrupt resource cleanup.
+}
+}
+
 void Game::InitWindow(const std::string& title, const int width, const int height)
 {
     App::InitWindow(title, width, height);
@@ -80,7 +102,9 @@ void Game::Update()
     App::Update();
 
     world->Update();
+    ContactManager::Get().RethrowPendingException();
     physicsWorld->Step(static_cast<float>(Time::deltaTime), 8, 3);
+    ContactManager::Get().RethrowPendingException();
     wormManager->Update();
     weaponManager->Update();
 
@@ -110,6 +134,7 @@ void Game::Update()
 
     for (auto& gameObject : GameObject::activeObjs)
         gameObject->Update();
+    ContactManager::Get().RethrowPendingException();
 }
 
 void Game::Render()
@@ -155,6 +180,7 @@ void Game::Clean()
         }
     }
 
+    ReportContactErrorDuringCleanup();
     ContactManager::Get().ClearAll();
 
     wormManager.reset();

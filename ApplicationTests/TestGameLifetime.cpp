@@ -325,6 +325,75 @@ TEST_F(GameLifetime, GameClosesWithActiveProjectileParticlesAndPendingObjects)
     EXPECT_NO_THROW(game.Clean());
 }
 
+TEST_F(GameLifetime, ProjectileCanUnsubscribeDuringCollisionWithoutRemovingOtherListeners)
+{
+    auto projectile = std::make_unique<Projectile>(0, 2, 0, 0);
+    auto* pointer = projectile.get();
+    GameObject::activeObjs.emplace_back(std::move(projectile));
+    pointer->Initialise(game.Renderer(), &game.Registry());
+    const auto id = pointer->GetId();
+    auto* body = game.Registry().GetComponent<RigidBody>(id).body;
+    b2BodyDef definition;
+    definition.position.Set(0, 2);
+    auto* obstacle = game.Physics().CreateBody(&definition);
+    b2PolygonShape shape;
+    shape.SetAsBox(0.5f, 0.5f);
+    b2FixtureDef fixture;
+    fixture.shape = &shape;
+    fixture.isSensor = true;
+    obstacle->CreateFixture(&fixture);
+    int calls = 0;
+    auto observer = ContactManager::Get().AddEvent(id, BEGIN, [&](b2Contact*) { ++calls; });
+    game.Physics().Step(1.f / 60, 8, 3);
+    ASSERT_NE(body->GetContactList(), nullptr);
+    const int previousCalls = calls;
+    ContactManager::Get().BeginContact(body->GetContactList()->contact);
+    EXPECT_EQ(calls, previousCalls + 1);
+    EXPECT_NO_THROW(pointer->CleanUp());
+    EXPECT_NO_THROW(pointer->CleanUp());
+    EXPECT_TRUE(ContactManager::Get().RemoveEvent(observer));
+    game.Physics().DestroyBody(obstacle);
+    EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+}
+
+TEST_F(GameLifetime, CollisionExceptionIsReportedAfterStepAndDoesNotInterruptRepeatedGameCleanup)
+{
+    PhysicsInfo info{NONE, game.Registry().CreateEntity()};
+    b2BodyDef definition;
+    definition.position.Set(1000, 1000);
+    auto* fixed = game.Physics().CreateBody(&definition);
+    b2PolygonShape shape;
+    shape.SetAsBox(0.5f, 0.5f);
+    b2FixtureDef fixture;
+    fixture.shape = &shape;
+    fixture.isSensor = true;
+    fixture.userData.pointer = reinterpret_cast<uintptr_t>(&info);
+    fixed->CreateFixture(&fixture);
+    definition.type = b2_dynamicBody;
+    auto* moving = game.Physics().CreateBody(&definition);
+    moving->CreateFixture(&shape, 1);
+    int calls = 0;
+    ContactManager::Get().AddEvent(info.id, BEGIN, [&](b2Contact*)
+    {
+        ++calls;
+        throw std::runtime_error("Cleanup test collision failure");
+    });
+    const auto previousDelta = Time::deltaTime;
+    Time::deltaTime = 1.0 / 60;
+    EXPECT_THROW(game.Update(), std::runtime_error);
+    Time::deltaTime = previousDelta;
+    EXPECT_FALSE(game.Physics().IsLocked());
+    EXPECT_EQ(calls, 1);
+    EXPECT_FALSE(ContactManager::Get().TakePendingException());
+    ASSERT_NE(moving->GetContactList(), nullptr);
+    EXPECT_NO_THROW(ContactManager::Get().BeginContact(moving->GetContactList()->contact));
+    EXPECT_EQ(calls, 2);
+    EXPECT_NO_THROW(game.Clean());
+    EXPECT_FALSE(game.HasResources());
+    EXPECT_FALSE(ContactManager::Get().TakePendingException());
+    EXPECT_NO_THROW(game.Clean());
+}
+
 TEST_F(GameLifetime, EmptyTerrainRebuildRemovesBodyAndCleanupCanBeRepeated)
 {
     Map* map = nullptr;

@@ -22,7 +22,7 @@ Worm::Worm(SDL_Renderer* newRenderer, World* newWorld, b2World* physicsWorld, co
         physicsInfo.tag = PhysicsTag::WORM;
         physicsInfo.id = objectId;
 
-        ContactManager::Get().AddEvent(objectId, CollisionType::BEGIN,
+        damageSubscription = ContactManager::Get().AddEvent(objectId, CollisionType::BEGIN,
                                        [&](b2Contact* contact)
                                        {
                                            auto entId = GetEntityWithTag(
@@ -52,9 +52,9 @@ Worm::Worm(SDL_Renderer* newRenderer, World* newWorld, b2World* physicsWorld, co
         collider->FreezeRotation();
         ColliderFactory::Get().CreateTriggerFixture(collider->GetBody(), &groundShape,
                                                     groundedPhysicsInfo);
-        ContactManager::Get().AddEvent(groundedId, CollisionType::BEGIN,
+        groundedBeginSubscription = ContactManager::Get().AddEvent(groundedId, CollisionType::BEGIN,
                                        [&](b2Contact*) { grounded = true; });
-        ContactManager::Get().AddEvent(groundedId, CollisionType::END,
+        groundedEndSubscription = ContactManager::Get().AddEvent(groundedId, CollisionType::END,
                                        [&](b2Contact*) { grounded = false; });
 
         healthBar =
@@ -123,12 +123,10 @@ void Worm::CleanUp()
     {
         return;
     }
-    ContactManager::Get().ClearEvent(objectId, CollisionType::BEGIN);
-    if (hasGroundedEntity)
-    {
-        ContactManager::Get().ClearEvent(groundedId, CollisionType::BEGIN);
-        ContactManager::Get().ClearEvent(groundedId, CollisionType::END);
-    }
+    ContactManager::Get().RemoveEvent(damageSubscription);
+    ContactManager::Get().RemoveEvent(groundedBeginSubscription);
+    ContactManager::Get().RemoveEvent(groundedEndSubscription);
+    damageSubscription = groundedBeginSubscription = groundedEndSubscription = 0;
     if (collider)
     {
         collider->GetBody()->GetWorld()->DestroyBody(collider->GetBody());

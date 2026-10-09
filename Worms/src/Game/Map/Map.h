@@ -35,6 +35,7 @@ private:
     void SimplifyContour(std::vector<std::vector<b2Vec2>>& physPoints);
 
     bool destroyed = false;
+    SubscriptionId destructionSubscription = 0;
     b2World* physicsWorld;
 
     Position bulltetPos;
