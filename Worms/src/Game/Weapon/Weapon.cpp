@@ -13,13 +13,30 @@ Weapon::Weapon( Camera& camera ) : camera( camera )
 void Weapon::Initialise( SDL_Renderer* newRenderer, World* newWorld )
 {
 	GameObject::Initialise( newRenderer, newWorld );
-	world->AddComponent<Position>( objectId, { 0, 0 } );
-	world->AddComponent<Rotation>( objectId, { 0 } );
+	try
+	{
+		world->AddComponent<Position>( objectId, { 0, 0 } );
+		world->AddComponent<Rotation>( objectId, { 0 } );
+		world->AddComponent<Sprite>( objectId );
+		powerBar.reset( IMG_LoadTexture( renderer, "powerBar.png" ) );
+		SDL_CHECK( powerBar.get() );
+		canShoot = true;
+	}
+	catch (...)
+	{
+		CleanUp();
+		throw;
+	}
+}
 
-	Sprite& spriteComponent = world->AddComponent<Sprite>( objectId );
-
-	powerBar.reset( IMG_LoadTexture( renderer, "powerBar.png" ) );
-	SDL_CHECK( powerBar.get() );
+void Weapon::CleanUp()
+{
+    ClearParent();
+    Deactivate();
+    projTexture = nullptr;
+    explosionSound = collisionSound = shootingSound = nullptr;
+    GameObject::CleanUp();
+    powerBar.reset();
 }
 
 void Weapon::Update()

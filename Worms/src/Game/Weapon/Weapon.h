@@ -1,6 +1,7 @@
 #pragma once
 #include "Core/Camera/Camera.h"
 #include "Core/GameObject.h"
+#include "Core/SDLHandles.h"
 #include "Game/Components.h"
 #include "Game/Weapon/Projectile.h"
 #include "WeaponImpl.h"
@@ -11,12 +12,13 @@
 class Weapon : public GameObject
 {
 public:
-    using TexturePtr = std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>;
+    using TexturePtr = Sdl::TexturePtr;
     Weapon(Camera& camera);
 
     void Initialise(SDL_Renderer* newRenderer, World* newWorld) override;
     void Update() override;
     void Render() override;
+    void CleanUp() override;
     void Activate()
     {
         canShoot = true;
@@ -64,7 +66,7 @@ private:
     std::optional<EntityId> parentId;
     float force = 0;
     bool canShoot = true;
-    TexturePtr powerBar{nullptr, &SDL_DestroyTexture};
+    TexturePtr powerBar;
     SDL_Texture* projTexture = nullptr;
     Sound* explosionSound = nullptr;
     Sound* collisionSound = nullptr;

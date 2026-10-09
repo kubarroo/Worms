@@ -9,9 +9,11 @@ public:
     HealthBar(SDL_Renderer* renderer, World* world, EntityId newParentId, const Camera& camera,
               int health, SDL_Texture* texture);
     void Render() override;
+    void CleanUp() override;
     void TakeDamage(int amount);
     int getCurrentHp()
     {
+        if (!HasEntity()) throw std::logic_error("HealthBar has no entity");
         return world->GetComponent<Health>(objectId).current;
     }
 

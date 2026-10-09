@@ -4,23 +4,22 @@
 
 std::optional<PhysicTexture> IMG_LoadPhysicTexture(SDL_Renderer* renderer, const char* file)
 {
-    SDL_Texture* texture = NULL;
-    SDL_Surface* surface = IMG_Load(file);
+    Sdl::SurfacePtr surface(IMG_Load(file));
     if (surface)
     {
-        // texture = SDL_CreateTextureFromSurface( renderer, surface );
-        SDL_LockSurface(surface);
-        auto points = MarchingSquares((Uint32*)surface->pixels, surface->w, surface->h, 64);
         std::vector<std::vector<b2Vec2>> physPoints;
-        for (int i = 0; i < points.size(); i++)
         {
-            physPoints.push_back({});
-            for (int j = static_cast<int>(points[i].size() - 1); j >= 0; j--)
-                physPoints[i].emplace_back(float(points[i][j].x / 100.f),
-                                           float(-points[i][j].y / 100.f));
+            Sdl::SurfaceLock lock(surface.get());
+            auto points = MarchingSquares((Uint32*)surface->pixels, surface->w, surface->h, 64);
+            for (int i = 0; i < points.size(); i++)
+            {
+                physPoints.push_back({});
+                for (int j = static_cast<int>(points[i].size()) - 1; j >= 0; j--)
+                    physPoints[i].emplace_back(float(points[i][j].x / 100.f),
+                                               float(-points[i][j].y / 100.f));
+            }
         }
-        SDL_UnlockSurface(surface);
-        return PhysicTexture{physPoints, surface};
+        return PhysicTexture{std::move(physPoints), std::move(surface)};
     }
 
     return {};
@@ -29,10 +28,11 @@ std::optional<PhysicTexture> IMG_LoadPhysicTexture(SDL_Renderer* renderer, const
 std::vector<std::vector<SDL_Point>> MarchingSquares(Uint32* org_pixels, int w, int h, int threshold)
 {
     std::vector<std::vector<SDL_Point>> shapes{};
-    SDL_Surface* bitmap =
-        SDL_CreateRGBSurfaceWithFormat(0, w + 1, h + 1, 1, SDL_PIXELFORMAT_INDEX8);
+    Sdl::SurfacePtr bitmap(
+        SDL_CreateRGBSurfaceWithFormat(0, w + 1, h + 1, 1, SDL_PIXELFORMAT_INDEX8));
+    SDL_CHECK(bitmap.get());
 
-    SDL_LockSurface(bitmap);
+    Sdl::SurfaceLock lock(bitmap.get());
 
     // First and last column and row should be 0
     uint8_t* bitmap_pixels = (uint8_t*)bitmap->pixels;
@@ -144,9 +144,6 @@ std::vector<std::vector<SDL_Point>> MarchingSquares(Uint32* org_pixels, int w, i
             }
         }
     }
-
-    SDL_UnlockSurface(bitmap);
-    SDL_FreeSurface(bitmap);
 
     return shapes;
 }

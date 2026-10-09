@@ -47,8 +47,13 @@ Worm::Worm(SDL_Renderer* newRenderer, World* newWorld, b2World* physicsWorld, co
         b2PolygonShape groundShape;
         groundShape.SetAsBox(0.075, 0.07, {0.f, -0.08f}, 0.f);
 
-        collider = std::make_unique<Collider>(
-            ColliderFactory::Get().CreateDynamicBody(&shape, {pos.x, pos.y}, physicsInfo));
+        auto createdCollider = ColliderFactory::Get().CreateDynamicBody(&shape, {pos.x, pos.y}, physicsInfo);
+        try { collider = std::make_unique<Collider>(std::move(createdCollider)); }
+        catch (...)
+        {
+            createdCollider.GetBody()->GetWorld()->DestroyBody(createdCollider.GetBody());
+            throw;
+        }
         collider->FreezeRotation();
         ColliderFactory::Get().CreateTriggerFixture(collider->GetBody(), &groundShape,
                                                     groundedPhysicsInfo);
@@ -141,14 +146,16 @@ void Worm::CleanUp()
     if (healthBar)
     {
         healthBar->CleanUp();
+        healthBar.reset();
     }
     GameObject::CleanUp();
     spriteTexture.reset();
+    active = grounded = false;
 }
 
 void Worm::Render()
 {
-    healthBar->Render();
+    if (HasEntity() && healthBar) healthBar->Render();
 }
 
 void Worm::Activate()

@@ -1,6 +1,7 @@
 #pragma once
 #include "Core/Audio/Sound.h"
 #include "Core/GameObject.h"
+#include "Core/SDLHandles.h"
 #include "Core/Physics/Collider.h"
 #include "Core/Physics/ColliderFactory.h"
 #include "Game/Components.h"
@@ -13,7 +14,7 @@
 class Worm : public GameObject
 {
 public:
-    using TexturePtr = std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>;
+    using TexturePtr = Sdl::TexturePtr;
     Worm(SDL_Renderer* newRenderer, World* newWorld, b2World* physicsWorld, const Camera& camera,
          SDL_Texture* texture);
     void Update(std::vector<Worm*>& wormsToDelete);
@@ -32,7 +33,7 @@ private:
     Sound jumpSound{"jump.wav"};
     std::unique_ptr<HealthBar> healthBar;
     std::unique_ptr<Collider> collider = NULL;
-    TexturePtr spriteTexture{nullptr, &SDL_DestroyTexture};
+    TexturePtr spriteTexture;
 
     bool grounded = false;
     bool active = false;

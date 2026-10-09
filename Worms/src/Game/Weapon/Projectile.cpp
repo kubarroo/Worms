@@ -38,7 +38,6 @@ void Projectile::Update()
 
 void Projectile::CleanUp()
 {
-	if ( !HasEntity() ) return;
     ContactManager::Get().RemoveEvent(collisionSubscription);
     collisionSubscription = 0;
 	if ( collider )
@@ -49,6 +48,9 @@ void Projectile::CleanUp()
 	fixture = nullptr;
 	camera = nullptr;
 	GameObject::CleanUp();
+    texture = nullptr;
+    explosionSound = collisionSound = nullptr;
+    createSensor = false;
 }
 
 void Projectile::onCollision( b2Contact* constact )
@@ -63,32 +65,40 @@ void Projectile::onCollision( b2Contact* constact )
 
 void Projectile::Initialise( SDL_Renderer* newRenderer, World* newWorld )
 {
-	GameObject::Initialise( newRenderer, newWorld );
+    GameObject::Initialise(newRenderer, newWorld);
+    try
+    {
+        timer.Reset();
+        world->AddComponent<Position>(objectId, {startPosX, startPosY});
+        world->AddComponent<Sprite>(objectId, {texture});
+        world->AddComponent<Rotation>(objectId, {0});
+        auto& rigidBody = world->AddComponent<RigidBody>(objectId);
+        physicsInfo.id = objectId;
+        physicsInfo.tag = PhysicsTag::BULLET;
 
-	timer.Reset();
-
-	world->AddComponent<Position>( objectId, { startPosX, startPosY } );
-
-	Sprite& spriteComponent = world->AddComponent<Sprite>( objectId, { texture } );
-
-	world->AddComponent<Rotation>( objectId, { 0 } );
-	auto rigidBody = &world->AddComponent<RigidBody>( objectId );
-
-	physicsInfo.id = objectId;
-	physicsInfo.tag = PhysicsTag::BULLET;
-
-	b2CircleShape shape;
-	shape.m_radius = 0.1f;
-	collider = std::make_unique<Collider>( ColliderFactory::Get().CreateDynamicBody( &shape, { startPosX, startPosY }, physicsInfo, reinterpret_cast<uintptr_t>(&params) ) );
-	collider->SetContinuous( true );
-	collider->SetVelocity( b2Vec2( startVelX * params.maxSpeed, startVelY * params.maxSpeed ) );
-
-	rigidBody->body = collider->GetBody();
-	rigidBody->body->GetFixtureList()[0].SetRestitution( params.bounciness );
-	rigidBody->body->SetGravityScale( params.gravityScale );
-
-    collisionSubscription = ContactManager::Get().AddEvent(
-        objectId, CollisionType::BEGIN, std::bind(&Projectile::onCollision, this, std::placeholders::_1));
-
-	if ( camera ) camera->ChangeTarget( objectId );
+        b2CircleShape shape;
+        shape.m_radius = 0.1f;
+        auto createdCollider = ColliderFactory::Get().CreateDynamicBody(
+            &shape, {startPosX, startPosY}, physicsInfo, reinterpret_cast<uintptr_t>(&params));
+        try { collider = std::make_unique<Collider>(std::move(createdCollider)); }
+        catch (...)
+        {
+            createdCollider.GetBody()->GetWorld()->DestroyBody(createdCollider.GetBody());
+            throw;
+        }
+        collider->SetContinuous(true);
+        collider->SetVelocity(b2Vec2(startVelX * params.maxSpeed, startVelY * params.maxSpeed));
+        rigidBody.body = collider->GetBody();
+        rigidBody.body->GetFixtureList()->SetRestitution(params.bounciness);
+        rigidBody.body->SetGravityScale(params.gravityScale);
+        collisionSubscription = ContactManager::Get().AddEvent(
+            objectId, CollisionType::BEGIN,
+            std::bind(&Projectile::onCollision, this, std::placeholders::_1));
+        if (camera) camera->ChangeTarget(objectId);
+    }
+    catch (...)
+    {
+        CleanUp();
+        throw;
+    }
 }

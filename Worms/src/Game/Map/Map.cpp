@@ -16,26 +16,28 @@ Map::Map(b2World* physicsWorld) : physicsWorld(physicsWorld) {}
 
 void Map::Initialise(SDL_Renderer* renderer, World* world)
 {
+    if (!physicsWorld) throw std::invalid_argument("Map requires a physics world");
     GameObject::Initialise(renderer, world);
-
-    physicsInfo.id = objectId;
-    physicsInfo.tag = PhysicsTag::MAP;
-    world->AddComponent<Position>(objectId, {1.5f, -2.f});
-
-    physTex = IMG_LoadPhysicTexture(renderer, "map.png");
-    destructionSubscription = ContactManager::Get().AddEvent(objectId, CollisionType::BEGIN,
-                                   std::bind(&Map::DestroyMap, this, std::placeholders::_1));
-    if (physTex.has_value())
+    try
     {
-        auto& rb = world->AddComponent<RigidBody>(objectId);
-        std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)> texture(
-            SDL_CreateTextureFromSurface(renderer, physTex->surface), &SDL_DestroyTexture);
-        SDL_CHECK(texture.get());
-        SDL_QueryTexture(texture.get(), NULL, NULL, &mapSize.x, &mapSize.y);
-        world->AddComponent<Sprite>(objectId, {texture.get()});
-        texture.release();
-
+        physicsInfo.id = objectId;
+        physicsInfo.tag = PhysicsTag::MAP;
+        world->AddComponent<Position>(objectId, {1.5f, -2.f});
+        physTex = IMG_LoadPhysicTexture(renderer, "map.png");
+        SDL_CHECK((physTex ? physTex->surface.get() : nullptr));
+        destructionSubscription = ContactManager::Get().AddEvent(objectId, CollisionType::BEGIN,
+                                       std::bind(&Map::DestroyMap, this, std::placeholders::_1));
+        world->AddComponent<RigidBody>(objectId);
+        mapTexture.reset(SDL_CreateTextureFromSurface(renderer, physTex->surface.get()));
+        SDL_CHECK(mapTexture.get());
+        SDL_CALL(SDL_QueryTexture(mapTexture.get(), nullptr, nullptr, &mapSize.x, &mapSize.y));
+        world->AddComponent<Sprite>(objectId, {mapTexture.get()});
         CreateNewColliders();
+    }
+    catch (...)
+    {
+        CleanUp();
+        throw;
     }
 }
 
@@ -46,14 +48,13 @@ void Map::Update()
 
     Position mapPos = world->GetComponent<Position>(objectId);
     DestroyMapAtLocalPoint(GlobalToLocalPos(mapPos));
-    std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)> texture(
-        SDL_CreateTextureFromSurface(renderer, physTex->surface), &SDL_DestroyTexture);
+    Sdl::TexturePtr texture(SDL_CreateTextureFromSurface(renderer, physTex->surface.get()));
     SDL_CHECK(texture.get());
     auto& sprite = world->GetComponent<Sprite>(objectId);
     CreateNewColliders();
 
-    SDL_DestroyTexture(sprite.texture);
-    sprite.texture = texture.release();
+    sprite.texture = texture.get();
+    mapTexture = std::move(texture);
     destroyed = false;
 }
 
@@ -65,24 +66,17 @@ void Map::CleanUp()
     }
     ContactManager::Get().RemoveEvent(destructionSubscription);
     destructionSubscription = 0;
-    auto rb = world->TryGetComponent<RigidBody>(objectId);
-    if (rb && rb->get().body)
+    if (mapBody)
     {
-        physicsWorld->DestroyBody(rb->get().body);
-        rb->get().body = nullptr;
-    }
-    auto sprite = world->TryGetComponent<Sprite>(objectId);
-    if (sprite)
-    {
-        SDL_DestroyTexture(sprite->get().texture);
-        sprite->get().texture = nullptr;
-    }
-    if (physTex)
-    {
-        SDL_FreeSurface(physTex->surface);
-        physTex.reset();
+        physicsWorld->DestroyBody(mapBody);
+        mapBody = nullptr;
     }
     GameObject::CleanUp();
+    mapTexture.reset();
+    physTex.reset();
+    destroyed = false;
+    destructionRadius = 0;
+    mapSize = {};
 }
 
 SDL_Point Map::GlobalToLocalPos(const Position& mapPos)
@@ -97,7 +91,9 @@ SDL_Point Map::GlobalToLocalPos(const Position& mapPos)
 
 void Map::DestroyMapAtLocalPoint(SDL_Point point)
 {
-    auto surf = physTex.value().surface;
+    if (!HasEntity() || !physTex) return;
+    auto* surf = physTex->surface.get();
+    Sdl::SurfaceLock lock(surf);
     for (int y = 0; y < surf->h; y++)
     {
         for (int x = 0; x < surf->w; x++)
@@ -175,6 +171,7 @@ void Map::CreateNewColliders()
         body = nullptr;
     }
     body = replacement;
+    mapBody = replacement;
     physTex->points = std::move(physPoints);
 }
 
@@ -193,7 +190,8 @@ void Map::GenerateFixturesForAllContours(Collider& collider,
 std::vector<std::vector<b2Vec2>> Map::CreateContour()
 {
     std::vector<std::vector<b2Vec2>> physPoints;
-    auto surf = physTex->surface;
+    auto* surf = physTex->surface.get();
+    Sdl::SurfaceLock lock(surf);
     auto shapes = MarchingSquares((Uint32*)surf->pixels, surf->w, surf->h, 64);
     for (int i = 0; i < shapes.size(); i++)
     {

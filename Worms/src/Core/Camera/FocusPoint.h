@@ -9,6 +9,11 @@ class FocusPoint : public GameObject
 {
 public:
     FocusPoint(SDL_Renderer* newRenderer, World* newWorld);
+    void CleanUp() override
+    {
+        ClearTarget();
+        GameObject::CleanUp();
+    }
     void ChangeTarget(EntityId newTargetId)
     {
         target = newTargetId;

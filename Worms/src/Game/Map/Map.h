@@ -37,10 +37,12 @@ private:
     bool destroyed = false;
     SubscriptionId destructionSubscription = 0;
     b2World* physicsWorld;
+    b2Body* mapBody = nullptr;
 
     Position bulltetPos;
     PhysicsInfo physicsInfo;
     std::optional<PhysicTexture> physTex;
+    Sdl::TexturePtr mapTexture;
     float destructionRadius = 0;
 
     SDL_Point mapSize{};

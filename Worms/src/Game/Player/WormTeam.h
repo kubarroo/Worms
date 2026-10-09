@@ -7,7 +7,7 @@ class WormTeam
     friend class Worm;
 
 public:
-    using TexturePtr = std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>;
+    using TexturePtr = Sdl::TexturePtr;
 
     explicit WormTeam(TexturePtr texture) : healthBarTexture(std::move(texture)) {}
 

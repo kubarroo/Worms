@@ -22,9 +22,9 @@ void ParticleSystem::CleanUp()
         world->DestroyEntity(particle);
     }
     particles.clear();
-    SDL_DestroyTexture(texture);
-    texture = nullptr;
+    texture.reset();
     GameObject::CleanUp();
+    timer = progress = 0;
 }
 
 void ParticleSystem::Update()
@@ -46,26 +46,32 @@ void ParticleSystem::Update()
 void ParticleSystem::Initialise(SDL_Renderer* newRenderer, World* newWorld)
 {
     GameObject::Initialise(newRenderer, newWorld);
-    texture = IMG_LoadTexture(renderer, particleImg.c_str());
-    SDL_CHECK(texture);
-
-    particles.reserve(static_cast<std::size_t>(amountOfParticles));
-
-    for (int i = 0; i < amountOfParticles; i++)
+    try
     {
-        EntityId particleId = world->CreateEntity();
-        particles.emplace_back(particleId);
-        b2Vec2 vel = {rand() * 2.f / RAND_MAX - 1.f, rand() * 2.f / RAND_MAX - 1.f};
-        vel *= 1.f / sqrt(vel.x * vel.x + vel.y * vel.y);
-        vel *= 0.012f * rand() / RAND_MAX;
-        world->AddComponent<Particle>(particleId,
-                                      {&progress, nullptr, [](double x, double y)
-                                       { return std::pair<float, float>{x * 0.999, y * 0.999}; },
-                                       [](double x) { return x * 0.98; }});
-        world->AddComponent<Position>(particleId, {startPosX, startPosY});
-        world->AddComponent<Motion>(particleId, {vel.x, vel.y});
-        world->AddComponent<Sprite>(particleId, {texture});
-        world->AddComponent<Scale>(particleId, {startScale * rand() / RAND_MAX});
+        texture.reset(IMG_LoadTexture(renderer, particleImg.c_str()));
+        SDL_CHECK(texture.get());
+        particles.reserve(static_cast<std::size_t>(amountOfParticles));
+        for (int i = 0; i < amountOfParticles; i++)
+        {
+            EntityId particleId = world->CreateEntity();
+            particles.emplace_back(particleId);
+            b2Vec2 vel = {rand() * 2.f / RAND_MAX - 1.f, rand() * 2.f / RAND_MAX - 1.f};
+            vel *= 1.f / sqrt(vel.x * vel.x + vel.y * vel.y);
+            vel *= 0.012f * rand() / RAND_MAX;
+            world->AddComponent<Particle>(particleId,
+                                          {&progress, nullptr, [](double x, double y)
+                                           { return std::pair<float, float>{x * 0.999, y * 0.999}; },
+                                           [](double x) { return x * 0.98; }});
+            world->AddComponent<Position>(particleId, {startPosX, startPosY});
+            world->AddComponent<Motion>(particleId, {vel.x, vel.y});
+            world->AddComponent<Sprite>(particleId, {texture.get()});
+            world->AddComponent<Scale>(particleId, {startScale * rand() / RAND_MAX});
+        }
+    }
+    catch (...)
+    {
+        CleanUp();
+        throw;
     }
 }
 

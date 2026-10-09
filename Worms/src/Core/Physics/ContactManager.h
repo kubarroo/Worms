@@ -45,6 +45,7 @@ public:
     void ClearEvent(const EntityId entId, const CollisionType);
 
     void ClearAll();
+    std::size_t GetSubscriptionCount() const noexcept { return subscriptions.size(); }
     // Consume errors only outside Box2D callbacks, after the world is unlocked.
     std::exception_ptr TakePendingException() noexcept;
     void RethrowPendingException();

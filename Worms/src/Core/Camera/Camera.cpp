@@ -27,8 +27,17 @@ Position adjustPos(const Position& focusPos, const Position& currentPos)
 void Camera::Initialise(SDL_Renderer* newRenderer, World* newWorld)
 {
     GameObject::Initialise(newRenderer, newWorld);
-    world->AddComponent<Position>(objectId, {2, -1});
-    focusPoint = std::make_unique<FocusPoint>(newRenderer, newWorld);
+    try
+    {
+        world->AddComponent<Position>(objectId, {2, -1});
+        focusPoint = std::make_unique<FocusPoint>(newRenderer, newWorld);
+        timer.Reset();
+    }
+    catch (...)
+    {
+        CleanUp();
+        throw;
+    }
 }
 
 void Camera::Update()

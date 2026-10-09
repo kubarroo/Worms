@@ -8,7 +8,7 @@ void WeaponManager::LoadTexture(const std::string& path)
     if (textures.contains(path))
         return;
 
-    TexturePtr texture(IMG_LoadTexture(renderer, path.c_str()), &SDL_DestroyTexture);
+    TexturePtr texture(IMG_LoadTexture(renderer, path.c_str()));
     SDL_CHECK(texture.get());
     textures.emplace(path, std::move(texture));
 }

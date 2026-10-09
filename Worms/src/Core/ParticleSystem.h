@@ -1,5 +1,6 @@
 #pragma once
 #include "Core/GameObject.h"
+#include "Core/SDLHandles.h"
 #include "Core/Time.h"
 #include "ECS/System.h"
 #include "ExceptionHandling/SDL_Exception.h"
@@ -27,5 +28,5 @@ private:
     float length = 5.f;
     float progress = 0.f;
     std::vector<EntityId> particles;
-    SDL_Texture* texture = nullptr;
+    Sdl::TexturePtr texture;
 };

@@ -21,7 +21,11 @@ static_assert(!std::is_copy_assignable_v<Music>);
 
 struct MapTestAccess
 {
-    static SDL_Surface* Surface(Map& map) { return map.physTex->surface; }
+    static SDL_Surface* Surface(Map& map) { return map.physTex->surface.get(); }
+    static bool HasResources(const Map& map)
+    {
+        return map.mapTexture || map.physTex || map.mapBody;
+    }
     static void RequestRebuild(Map& map)
     {
         map.destroyed = true;
@@ -121,7 +125,7 @@ protected:
     {
         WormTeam::TexturePtr texture(
             SDL_CreateTexture(game.Renderer(), SDL_PIXELFORMAT_RGBA8888,
-                              SDL_TEXTUREACCESS_STATIC, 40, 10), &SDL_DestroyTexture);
+                              SDL_TEXTUREACCESS_STATIC, 40, 10));
         ASSERT_NE(texture.get(), nullptr);
         team = std::make_unique<WormTeam>(std::move(texture));
     }
@@ -276,6 +280,8 @@ TEST_F(GameLifetime, FailedTextureLoadCanBeCleanedWithoutLeakingAnEntity)
     auto* pointer = effect.get();
     GameObject::objsToAdd.emplace_back(std::move(effect));
     EXPECT_THROW(pointer->Initialise(game.Renderer(), &game.Registry()), SDL_Exception);
+    EXPECT_FALSE(pointer->HasEntity());
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
     EXPECT_NO_THROW(pointer->CleanUp());
     EXPECT_NO_THROW(pointer->CleanUp());
     EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
@@ -290,6 +296,8 @@ TEST_F(GameLifetime, PartialParticleInitializationCanBeCleanedWithoutLeakingEnti
     ParticleSystem effect("blood.png", 1, 0, 0, 10);
     // Missing Motion fails after creating the first particle and its Position.
     EXPECT_THROW(effect.Initialise(game.Renderer(), &incompleteWorld), std::exception);
+    EXPECT_FALSE(effect.HasEntity());
+    EXPECT_EQ(incompleteWorld.GetAmountOfAvailableEntities(), available);
     EXPECT_NO_THROW(effect.CleanUp());
     EXPECT_NO_THROW(effect.CleanUp());
     EXPECT_EQ(incompleteWorld.GetAmountOfAvailableEntities(), available);
@@ -468,5 +476,191 @@ TEST_F(GameLifetime, FailedMapColliderReplacementPreservesOldResourcesAndCanBeRe
     EXPECT_NO_THROW(map->Update());
     EXPECT_FALSE(MapTestAccess::HasPendingRebuild(*map));
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+}
+
+TEST_F(GameLifetime, FailedMapInitializationAutomaticallyReleasesResourcesAndSubscription)
+{
+    World incompleteWorld(game.Renderer());
+    incompleteWorld.RegisterComponent<Position>();
+    incompleteWorld.RegisterComponent<RigidBody>();
+    const auto entities = incompleteWorld.GetAmountOfAvailableEntities();
+    const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
+    Map map(&game.Physics());
+    // Missing Sprite fails after loading the surface, texture and callback.
+    EXPECT_THROW(map.Initialise(game.Renderer(), &incompleteWorld), std::exception);
+    EXPECT_FALSE(map.HasEntity());
+    EXPECT_FALSE(MapTestAccess::HasResources(map));
+    EXPECT_EQ(incompleteWorld.GetAmountOfAvailableEntities(), entities);
+    EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+    EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
+    EXPECT_NO_THROW(map.CleanUp());
+    EXPECT_NO_THROW(map.Update());
+    EXPECT_NO_THROW(map.DestroyMapAtLocalPoint({0, 0}));
+}
+
+TEST_F(GameLifetime, FailedProjectileInitializationAutomaticallyReleasesBodyAndSubscription)
+{
+    Camera uninitializedCamera;
+    const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
+    Projectile projectile(0, 2, 0, 0);
+    projectile.SetCamera(&uninitializedCamera);
+    // ChangeTarget fails after creating the projectile's body and subscription.
+    EXPECT_THROW(projectile.Initialise(game.Renderer(), &game.Registry()), std::logic_error);
+    EXPECT_FALSE(projectile.HasEntity());
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+    EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+    EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
+    EXPECT_NO_THROW(projectile.CleanUp());
+    EXPECT_NO_THROW(projectile.Update());
+}
+
+TEST_F(GameLifetime, FailedCameraInitializationAutomaticallyReleasesItsEntity)
+{
+    World incompleteWorld(game.Renderer());
+    const auto available = incompleteWorld.GetAmountOfAvailableEntities();
+    Camera localCamera;
+    EXPECT_THROW(localCamera.Initialise(game.Renderer(), &incompleteWorld), std::exception);
+    EXPECT_FALSE(localCamera.HasEntity());
+    EXPECT_EQ(incompleteWorld.GetAmountOfAvailableEntities(), available);
+    EXPECT_NO_THROW(localCamera.CleanUp());
+    EXPECT_NO_THROW(localCamera.Update());
+}
+
+TEST_F(GameLifetime, FailedWeaponTextureLoadAutomaticallyReleasesItsEntity)
+{
+    Weapon localWeapon(*camera);
+    EXPECT_THROW(localWeapon.Initialise(nullptr, &game.Registry()), SDL_Exception);
+    EXPECT_FALSE(localWeapon.HasEntity());
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+    EXPECT_NO_THROW(localWeapon.CleanUp());
+    EXPECT_NO_THROW(localWeapon.Update());
+    EXPECT_NO_THROW(localWeapon.Render());
+}
+
+TEST_F(GameLifetime, CleanedHealthBarDoesNotReleaseBorrowedTexture)
+{
+    Sdl::TexturePtr texture(SDL_CreateTexture(game.Renderer(), SDL_PIXELFORMAT_RGBA8888,
+                                            SDL_TEXTUREACCESS_STATIC, 40, 10));
+    ASSERT_TRUE(texture);
+    HealthBar bar(game.Renderer(), &game.Registry(), camera->GetId(), *camera, 100, texture.get());
+    bar.CleanUp();
+    EXPECT_FALSE(bar.HasEntity());
+    EXPECT_EQ(SDL_QueryTexture(texture.get(), nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_NO_THROW(bar.CleanUp());
+    EXPECT_NO_THROW(bar.Render());
+    EXPECT_NO_THROW(bar.TakeDamage(10));
+    EXPECT_THROW(bar.getCurrentHp(), std::logic_error);
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+}
+
+TEST_F(GameLifetime, RemovingWormPreservesSharedHealthTextureAndCleanedWormCanBeRendered)
+{
+    CreateTestTeam();
+    ASSERT_TRUE(team);
+    auto* first = AddTrackedWorm();
+    auto* second = AddTrackedWorm();
+    auto* texture = team->GetHealthBarTexture();
+    first->CleanUp();
+    EXPECT_NO_THROW(first->Render());
+    EXPECT_NO_THROW(first->Jump());
+    team->RemoveWorm(first);
+    EXPECT_EQ(SDL_QueryTexture(texture, nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_NO_THROW(second->Render());
+}
+
+TEST_F(GameLifetime, WeaponAndProjectileCleanupPreserveBorrowedTexture)
+{
+    Sdl::TexturePtr texture(SDL_CreateTexture(game.Renderer(), SDL_PIXELFORMAT_RGBA8888,
+                                            SDL_TEXTUREACCESS_STATIC, 10, 10));
+    ASSERT_TRUE(texture);
+    Weapon localWeapon(*camera);
+    localWeapon.Initialise(game.Renderer(), &game.Registry());
+    localWeapon.SetTexture(texture.get());
+    localWeapon.SetProjectileTexture(texture.get());
+    Projectile projectile(0, 2, 0, 0);
+    projectile.SetTexture(texture.get());
+    projectile.Initialise(game.Renderer(), &game.Registry());
+    localWeapon.CleanUp();
+    projectile.CleanUp();
+    EXPECT_EQ(SDL_QueryTexture(texture.get(), nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_NO_THROW(localWeapon.Render());
+    EXPECT_NO_THROW(localWeapon.Update());
+    EXPECT_NO_THROW(projectile.Update());
+    EXPECT_NO_THROW(localWeapon.CleanUp());
+    EXPECT_NO_THROW(projectile.CleanUp());
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+    EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+}
+
+TEST_F(GameLifetime, RepeatedObjectLifecyclesRestoreEntitiesBodiesAndSubscriptions)
+{
+    const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
+    for (int i = 0; i < 5; ++i)
+    {
+        ParticleSystem particles("blood.png", 1, 0, 0, 4);
+        particles.Initialise(game.Renderer(), &game.Registry());
+        const auto particleId = particles.GetId();
+        EXPECT_THROW(particles.Initialise(game.Renderer(), &game.Registry()), std::logic_error);
+        EXPECT_EQ(particles.GetId(), particleId);
+        particles.CleanUp();
+        EXPECT_NO_THROW(particles.CleanUp());
+        EXPECT_NO_THROW(particles.Update());
+
+        Camera localCamera;
+        localCamera.Initialise(game.Renderer(), &game.Registry());
+        const auto cameraId = localCamera.GetId();
+        EXPECT_THROW(localCamera.Initialise(game.Renderer(), &game.Registry()), std::logic_error);
+        EXPECT_EQ(localCamera.GetId(), cameraId);
+        localCamera.CleanUp();
+        EXPECT_NO_THROW(localCamera.CleanUp());
+        EXPECT_NO_THROW(localCamera.Update());
+
+        Weapon localWeapon(*camera);
+        localWeapon.Initialise(game.Renderer(), &game.Registry());
+        const auto weaponId = localWeapon.GetId();
+        EXPECT_THROW(localWeapon.Initialise(game.Renderer(), &game.Registry()), std::logic_error);
+        EXPECT_EQ(localWeapon.GetId(), weaponId);
+        localWeapon.CleanUp();
+        EXPECT_NO_THROW(localWeapon.CleanUp());
+
+        Projectile projectile(0, 2, 0, 0);
+        projectile.Initialise(game.Renderer(), &game.Registry());
+        const auto projectileId = projectile.GetId();
+        EXPECT_THROW(projectile.Initialise(game.Renderer(), &game.Registry()), std::logic_error);
+        EXPECT_EQ(projectile.GetId(), projectileId);
+        projectile.CleanUp();
+        EXPECT_NO_THROW(projectile.CleanUp());
+
+        Map map(&game.Physics());
+        map.Initialise(game.Renderer(), &game.Registry());
+        const auto mapId = map.GetId();
+        EXPECT_THROW(map.Initialise(game.Renderer(), &game.Registry()), std::logic_error);
+        EXPECT_EQ(map.GetId(), mapId);
+        map.CleanUp();
+        EXPECT_NO_THROW(map.CleanUp());
+
+        EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+        EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+        EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
+    }
+}
+
+TEST_F(GameLifetime, SurfaceOwnershipMovesAndLocksAreReleasedAfterException)
+{
+    auto loaded = IMG_LoadPhysicTexture(game.Renderer(), "map.png");
+    ASSERT_TRUE(loaded);
+    auto* surface = loaded->surface.get();
+    ASSERT_NE(surface, nullptr);
+    auto moved = std::move(*loaded);
+    EXPECT_FALSE(loaded->surface);
+    EXPECT_EQ(moved.surface.get(), surface);
+    EXPECT_EQ(surface->locked, 0);
+    EXPECT_THROW(( [&]()
+    {
+        Sdl::SurfaceLock lock(surface);
+        EXPECT_GT(surface->locked, 0);
+        throw std::runtime_error("Surface lock test");
+    }() ), std::runtime_error);
+    EXPECT_EQ(surface->locked, 0);
 }
 }

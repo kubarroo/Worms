@@ -4,12 +4,13 @@
 #include <optional>
 #include <span>
 #include <vector>
+#include "Core/SDLHandles.h"
 
 
 struct PhysicTexture
 {
     std::vector<std::vector<b2Vec2>> points;
-    SDL_Surface* surface = nullptr;
+    Sdl::SurfacePtr surface;
 };
 
 std::optional<PhysicTexture> IMG_LoadPhysicTexture(SDL_Renderer* renderer, const char* file);

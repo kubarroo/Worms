@@ -46,6 +46,12 @@ void HealthBar::Render()
     SDL_RenderCopy(renderer, healthBar, &slice, &renderQuad);
 }
 
+void HealthBar::CleanUp()
+{
+    GameObject::CleanUp();
+    healthBar = nullptr;
+}
+
 void HealthBar::TakeDamage(int amount)
 {
     if (!HasEntity())

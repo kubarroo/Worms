@@ -12,8 +12,8 @@ SDL_Texture* createTexture(int team, SDL_Renderer* renderer)
 {
     int width = 40;
     int height = 10;
-    SDL_Surface* surface =
-        SDL_CreateRGBSurface(0, width, height, 32, 0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
+    Sdl::SurfacePtr surface(
+        SDL_CreateRGBSurface(0, width, height, 32, 0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000));
     if (!surface)
     {
         return nullptr;
@@ -45,8 +45,7 @@ SDL_Texture* createTexture(int team, SDL_Renderer* renderer)
             pixels[(y * surface->w) + x] = color;
         }
     }
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-    SDL_FreeSurface(surface);
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface.get());
     return texture;
 };
 
@@ -83,8 +82,7 @@ void WormManager::CreateTeam(int size)
         throw std::invalid_argument("Team must contain at least one worm");
     }
 
-    WormTeam::TexturePtr texture(createTexture(static_cast<int>(teams.size()), renderer),
-                                 &SDL_DestroyTexture);
+    WormTeam::TexturePtr texture(createTexture(static_cast<int>(teams.size()), renderer));
 
     SDL_CHECK(texture.get());
 

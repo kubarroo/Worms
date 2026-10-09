@@ -24,7 +24,7 @@ public:
 	Weapon* GetWeapon() const { return weapon; }
 	~WeaponManager() = default;
 private:
-	using TexturePtr = std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>;
+	using TexturePtr = Sdl::TexturePtr;
 	void LoadTexture(const std::string& path);
 	void LoadSound(const std::string& path);
 	void ApplyCurrentWeapon();
