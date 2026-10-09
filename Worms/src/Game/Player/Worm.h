@@ -35,7 +35,8 @@ private:
 
     PhysicsInfo physicsInfo;
     PhysicsInfo groundedPhysicsInfo;
-    EntityId groundedId;
+    EntityId groundedId{};
+    bool hasGroundedEntity = false;
     static constexpr float WORM_SPEED = 0.8f;
     static constexpr float JUMP_FORCE = 2.5f;
 };

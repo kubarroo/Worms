@@ -3,6 +3,7 @@
 #include <SDL2/SDL.h>
 #include <box2d/b2_body.h>
 #include <functional>
+#include <optional>
 
 struct Position
 {
@@ -21,12 +22,12 @@ struct Scale
 
 struct Sprite
 {
-    SDL_Texture* texture;
+    SDL_Texture* texture = nullptr;
 };
 
 struct RigidBody
 {
-    b2Body* body;
+    b2Body* body = nullptr;
 };
 
 struct Rotation
@@ -42,14 +43,14 @@ struct Health
 
 struct Follow
 {
-    EntityId id;
+    std::optional<EntityId> id;
     float offsetX = 0.f;
     float offsetY = 0.f;
 };
 
 struct Particle
 {
-    float* progress;
+    float* progress = nullptr;
     std::function<std::pair<float, float>(float, float)> pos_characteristic = nullptr;
     std::function<std::pair<float, float>(float, float)> vel_characteristic = nullptr;
     std::function<float(float)> size_characteristic = nullptr;

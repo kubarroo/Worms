@@ -27,12 +27,16 @@ Position adjustPos(const Position& focusPos, const Position& currentPos)
 void Camera::Initialise(SDL_Renderer* newRenderer, World* newWorld)
 {
     GameObject::Initialise(newRenderer, newWorld);
-    pos = &world->AddComponent<Position>(objectId, {2, -1});
+    world->AddComponent<Position>(objectId, {2, -1});
     focusPoint = std::make_unique<FocusPoint>(newRenderer, newWorld);
 }
 
 void Camera::Update()
 {
+    if (!HasEntity() || !focusPoint)
+    {
+        return;
+    }
     if (Input::Get().CameraControll())
     {
         ChangeX(Input::Get().CameraHorizontal() * static_cast<float>(Time::deltaTime) *
@@ -40,13 +44,34 @@ void Camera::Update()
         ChangeY(Input::Get().CameraVertical() * static_cast<float>(Time::deltaTime) * CAMERA_SPEED);
         return;
     }
-    if (focusPoint->GetPos().has_value())
+    auto targetPosition = focusPoint->GetPos();
+    if (targetPosition.has_value())
     {
-        ChangePos(adjustPos(focusPoint->GetPos().value(), *pos));
+        ChangePos(adjustPos(targetPosition->get(), GetPosition()));
         timer.Reset();
     }
-    else if (timer.Measure() > 1.5)
+    else if (timer.Measure() > 1.5 && noTargetEvent)
     {
         noTargetEvent();
     }
+}
+
+Position& Camera::GetPosition() const
+{
+    if (!HasEntity())
+    {
+        throw std::logic_error("Camera has no entity");
+    }
+    return world->GetComponent<Position>(objectId);
+}
+
+void Camera::CleanUp()
+{
+    noTargetEvent = nullptr;
+    if (focusPoint)
+    {
+        focusPoint->CleanUp();
+        focusPoint.reset();
+    }
+    GameObject::CleanUp();
 }

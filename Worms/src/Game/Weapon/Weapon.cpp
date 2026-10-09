@@ -23,11 +23,17 @@ void Weapon::Initialise( SDL_Renderer* newRenderer, World* newWorld )
 
 void Weapon::Update()
 {
-	if ( !canShoot ) return;
+	if ( !HasEntity() || !canShoot || !parentId ) return;
+	auto parentPosition = world->TryGetComponent<Position>( *parentId );
+	if ( !parentPosition )
+	{
+		ClearParent();
+		return;
+	}
 
 	auto& pos = world->GetComponent<Position>( objectId );
 	auto& rot = world->GetComponent<Rotation>( objectId );
-	pos = world->GetComponent<Position>( parentId );
+	pos = parentPosition->get();
 
 	rot.degree += Input::Get().Vertical() * static_cast<float>(Time::deltaTime) * 100.f;
 
@@ -44,7 +50,7 @@ void Weapon::Update()
 		if ( force )
 		{
 			canShoot = false;
-			shootingSound->Play();
+			if ( shootingSound ) shootingSound->Play();
 			GameObject::objsToAdd.emplace_back(
 				std::make_unique<Projectile>( pos.x + 0.5f * cosf( rot.degree * static_cast<float>(M_PI) / 180 ),
 				pos.y + 0.5f * sinf( rot.degree * static_cast<float>(M_PI) / 180 ),
@@ -68,6 +74,7 @@ void Weapon::Update()
 
 void Weapon::Render()
 {
+	if ( !HasEntity() || !powerBar || !parentId ) return;
 	auto& pos = world->GetComponent<Position>( objectId );
 	auto& rot = world->GetComponent<Rotation>( objectId );
 	SDL_Point size;

@@ -9,7 +9,7 @@
 struct PhysicTexture
 {
     std::vector<std::vector<b2Vec2>> points;
-    SDL_Surface* surface;
+    SDL_Surface* surface = nullptr;
 };
 
 std::optional<PhysicTexture> IMG_LoadPhysicTexture(SDL_Renderer* renderer, const char* file);

@@ -4,25 +4,24 @@
 #include <algorithm>
 #include <memory>
 
-
 class Camera : public GameObject
 {
 public:
     float& X()
     {
-        return pos->x;
+        return GetPosition().x;
     };
     float X() const
     {
-        return pos->x;
+        return GetPosition().x;
     };
     float& Y()
     {
-        return pos->y;
+        return GetPosition().y;
     };
     float Y() const
     {
-        return pos->y;
+        return GetPosition().y;
     };
     float Zoom()
     {
@@ -31,18 +30,20 @@ public:
 
     void Initialise(SDL_Renderer* newRenderer, World* newWorld) override;
     void Update() override;
+    void CleanUp() override;
     void ChangePos(Position newPos)
     {
-        pos->x += newPos.x;
-        pos->y += newPos.y;
+        auto& pos = GetPosition();
+        pos.x += newPos.x;
+        pos.y += newPos.y;
     }
     void ChangeX(float deltaX)
     {
-        pos->x += deltaX;
+        GetPosition().x += deltaX;
     }
     void ChangeY(float deltaY)
     {
-        pos->y += deltaY;
+        GetPosition().y += deltaY;
     }
     void ChangeZoom(float delta)
     {
@@ -50,7 +51,18 @@ public:
     }
     void ChangeTarget(EntityId newTargetId)
     {
+        if (!focusPoint)
+        {
+            throw std::logic_error("Camera has no focus point");
+        }
         focusPoint->ChangeTarget(newTargetId);
+    }
+    void ClearTarget()
+    {
+        if (focusPoint)
+        {
+            focusPoint->ClearTarget();
+        }
     }
 
     std::function<void()> noTargetEvent = nullptr;
@@ -58,7 +70,7 @@ public:
 private:
     float zoom = 1.f;
     bool inputs_enabled = false;
-    Position* pos;
+    Position& GetPosition() const;
     std::unique_ptr<FocusPoint> focusPoint;
     Time::Timer timer{};
 

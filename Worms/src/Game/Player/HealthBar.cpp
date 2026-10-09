@@ -3,7 +3,6 @@
 #include "ExceptionHandling/SDL_Exception.h"
 #include <SDL_image.h>
 
-
 HealthBar::HealthBar(SDL_Renderer* renderer, World* world, EntityId newParentId,
                      const Camera& camera, int health, SDL_Texture* texture)
     : camera(camera)
@@ -19,6 +18,10 @@ HealthBar::HealthBar(SDL_Renderer* renderer, World* world, EntityId newParentId,
 
 void HealthBar::Render()
 {
+    if (!HasEntity() || !healthBar)
+    {
+        return;
+    }
     auto& pos = world->GetComponent<Position>(objectId);
     auto& hp = world->GetComponent<Health>(objectId);
     SDL_Point size;
@@ -36,5 +39,9 @@ void HealthBar::Render()
 
 void HealthBar::TakeDamage(int amount)
 {
+    if (!HasEntity())
+    {
+        return;
+    }
     world->GetComponent<Health>(objectId).current -= amount;
 }

@@ -40,6 +40,10 @@ public:
         auto& sprites = componentManager.GetComponentArray<Sprite>();
         for (EntityId ent : subscribed)
         {
+            if (!sprites.GetData(ent).texture)
+            {
+                continue;
+            }
             SDL_Point size;
             SDL_QueryTexture(sprites.GetData(ent).texture, NULL, NULL, &size.x, &size.y);
 
@@ -86,6 +90,10 @@ public:
         auto& rigidBody = componentManager.GetComponentArray<RigidBody>();
         for (EntityId ent : subscribed)
         {
+            if (!rigidBody.GetData(ent).body)
+            {
+                continue;
+            }
             positions.GetData(ent).x = rigidBody.GetData(ent).body->GetPosition().x;
             positions.GetData(ent).y = rigidBody.GetData(ent).body->GetPosition().y;
 
@@ -115,7 +123,17 @@ public:
         for (EntityId ent : subscribed)
         {
             auto& target = follows.GetData(ent);
-            auto& targetPosition = positions.GetData(target.id);
+            if (!target.id)
+            {
+                continue;
+            }
+            auto targetComponent = positions.TryGetData(*target.id);
+            if (!targetComponent)
+            {
+                target.id.reset();
+                continue;
+            }
+            auto& targetPosition = targetComponent->get();
             positions.GetData(ent).x = targetPosition.x + target.offsetX;
             positions.GetData(ent).y = targetPosition.y + target.offsetY;
         }

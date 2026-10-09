@@ -13,11 +13,19 @@ public:
     {
         target = newTargetId;
     }
+    void ClearTarget()
+    {
+        target.reset();
+    }
     std::optional<std::reference_wrapper<Position>> GetPos() const
     {
-        return world->TryGetComponent<Position>(target);
+        if (!HasEntity() || !target)
+        {
+            return {};
+        }
+        return world->TryGetComponent<Position>(*target);
     };
 
 private:
-    EntityId target;
+    std::optional<EntityId> target;
 };

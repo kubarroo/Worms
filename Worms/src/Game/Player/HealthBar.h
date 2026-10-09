@@ -16,6 +16,6 @@ public:
     }
 
 private:
-    SDL_Texture* healthBar;
+    SDL_Texture* healthBar = nullptr;
     const Camera& camera;
 };

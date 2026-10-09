@@ -3,7 +3,6 @@
 #include "ECS/ECS_Types.h"
 #include <set>
 
-
 class System
 {
 public:
@@ -30,6 +29,8 @@ public:
     {
         return static_cast<uint16_t>(subscribed.size());
     }
+
+    virtual ~System() = default;
 
 protected:
     Signature systemSignature;

@@ -16,13 +16,14 @@ Projectile::Projectile( float posX, float posY, float vX, float vY ) : startPosX
 
 void Projectile::Update()
 {
+	if ( !HasEntity() || !collider ) return;
 	auto& pos = world->GetComponent<Position>( objectId );
 	if ( createSensor ||
 		 pos.y < -15.f ||
 		 timer.Measure() > params.explosionOffset && params.explosionOffset != 0 )
 	{
 		createSensor = false;
-		explosionSound->Play();
+		if ( explosionSound ) explosionSound->Play();
 		GameObject::objsToAdd.emplace_back( std::make_unique<ParticleSystem>( "particle.png", params.explosionRadius * 3.f, pos.x, pos.y, 100 ) );
 
 		world->GetComponent<RigidBody>( objectId ).body->SetAwake( true );
@@ -37,15 +38,22 @@ void Projectile::Update()
 
 void Projectile::CleanUp()
 {
-	world->GetComponent<Sprite>( objectId ).texture = nullptr;
-	ColliderFactory::Get().GetPhysicsWorld()->DestroyBody( world->GetComponent<RigidBody>( objectId ).body );
+	if ( !HasEntity() ) return;
+	ContactManager::Get().ClearEvent( objectId, CollisionType::BEGIN );
+	if ( collider )
+	{
+		collider->GetBody()->GetWorld()->DestroyBody( collider->GetBody() );
+		collider.reset();
+	}
+	fixture = nullptr;
+	camera = nullptr;
 	GameObject::CleanUp();
 }
 
 void Projectile::onCollision( b2Contact* constact )
 {
 	ContactManager::Get().DeleteEvent( objectId, CollisionType::BEGIN, std::bind( &Projectile::onCollision, this, std::placeholders::_1 ) );
-	collisionSound->Play();
+	if ( collisionSound ) collisionSound->Play();
 	if ( params.explosionOffset == 0 )
 		createSensor = true;
 
@@ -79,5 +87,5 @@ void Projectile::Initialise( SDL_Renderer* newRenderer, World* newWorld )
 
 	ContactManager::Get().AddEvent( objectId, CollisionType::BEGIN, std::bind( &Projectile::onCollision, this, std::placeholders::_1 ) );
 
-	camera->ChangeTarget( objectId );
+	if ( camera ) camera->ChangeTarget( objectId );
 }

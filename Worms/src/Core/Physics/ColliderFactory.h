@@ -3,6 +3,7 @@
 #include "Game/Tags.h"
 #include <box2d/b2_shape.h>
 #include <box2d/b2_world.h>
+#include <stdexcept>
 
 class ColliderFactory
 {
@@ -31,11 +32,15 @@ public:
 
     b2World* GetPhysicsWorld()
     {
+        if (!physicsWorld)
+        {
+            throw std::logic_error("ColliderFactory has no physics world");
+        }
         return physicsWorld;
     };
 
 private:
     ColliderFactory() = default;
 
-    b2World* physicsWorld;
+    b2World* physicsWorld = nullptr;
 };

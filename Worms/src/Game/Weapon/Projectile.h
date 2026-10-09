@@ -36,14 +36,14 @@ private:
 	bool createSensor = false;
 	PhysicsInfo physicsInfo;
 	PhysicsInfo sensorInfo;
-	b2Fixture* fixture;
-	Camera* camera;
+	b2Fixture* fixture = nullptr;
+	Camera* camera = nullptr;
 	std::unique_ptr<Collider> collider;
 	Time::Timer timer;
 	Parameters params{};
 
-	SDL_Texture* texture;
-	Sound* explosionSound;
-	Sound* collisionSound;
+	SDL_Texture* texture = nullptr;
+	Sound* explosionSound = nullptr;
+	Sound* collisionSound = nullptr;
 };
 

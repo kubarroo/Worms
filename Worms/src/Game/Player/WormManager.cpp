@@ -101,7 +101,10 @@ void WormManager::Update()
     if (Input::Get().ChangeTeam())
         ChangeTeam();
     if (teams.empty())
+    {
+        weapon.ClearParent();
         return;
+    }
 
     teams[activeTeam]->Update();
 
@@ -112,6 +115,8 @@ void WormManager::Update()
     ActiveWormCheck();
     if (!teams.empty())
         weapon.SetParent(GetActiveWormId());
+    else
+        weapon.ClearParent();
 }
 
 void WormManager::RenderHealthBars()

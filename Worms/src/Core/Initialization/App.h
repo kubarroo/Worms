@@ -29,6 +29,7 @@ public:
     {
         return isRunning;
     }
+    virtual ~App() = default;
 
 protected:
     SDL_Window* window = NULL;

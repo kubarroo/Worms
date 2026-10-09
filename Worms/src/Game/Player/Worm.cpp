@@ -9,7 +9,6 @@
 #include <box2d/b2_fixture.h>
 #include <box2d/b2_polygon_shape.h>
 
-
 Worm::Worm(SDL_Renderer* newRenderer, World* newWorld, b2World* physicsWorld, const Camera& camera,
            SDL_Texture* texture)
 {
@@ -31,6 +30,7 @@ Worm::Worm(SDL_Renderer* newRenderer, World* newWorld, b2World* physicsWorld, co
                                    });
 
     groundedId = world->CreateEntity();
+    hasGroundedEntity = true;
     groundedPhysicsInfo.tag = PhysicsTag::GROUNDED;
     groundedPhysicsInfo.id = groundedId;
 
@@ -60,6 +60,10 @@ Worm::Worm(SDL_Renderer* newRenderer, World* newWorld, b2World* physicsWorld, co
 
 void Worm::Update(std::vector<Worm*>& wormsToDelete)
 {
+    if (!HasEntity() || !collider || !healthBar)
+    {
+        return;
+    }
     auto& pos = world->GetComponent<Position>(objectId);
 
     if (pos.y < -15.f)
@@ -74,7 +78,9 @@ void Worm::Update(std::vector<Worm*>& wormsToDelete)
         wormsToDelete.emplace_back(this);
     }
     if (!active)
+    {
         return;
+    }
 
     if (abs(rb.body->GetLinearVelocity().x) < 2)
         rb.body->SetLinearVelocity(
@@ -85,9 +91,15 @@ void Worm::Update(std::vector<Worm*>& wormsToDelete)
 
 void Worm::Jump()
 {
+    if (!HasEntity() || !collider)
+    {
+        return;
+    }
     auto& rb = world->GetComponent<RigidBody>(objectId);
     if (!IsGrounded() || !Input::Get().Jump() || rb.body->GetLinearVelocity().y > 0.4)
+    {
         return;
+    }
 
     grounded = false;
     rb.body->SetLinearVelocity(
@@ -97,11 +109,31 @@ void Worm::Jump()
 
 void Worm::CleanUp()
 {
-    ColliderFactory::Get().GetPhysicsWorld()->DestroyBody(collider->GetBody());
-    world->DestroyEntity(groundedId);
-    ContactManager::Get().ClearEvent(groundedId, CollisionType::BEGIN);
-    ContactManager::Get().ClearEvent(groundedId, CollisionType::END);
-    healthBar->CleanUp();
+    if (!HasEntity())
+    {
+        return;
+    }
+    ContactManager::Get().ClearEvent(objectId, CollisionType::BEGIN);
+    if (hasGroundedEntity)
+    {
+        ContactManager::Get().ClearEvent(groundedId, CollisionType::BEGIN);
+        ContactManager::Get().ClearEvent(groundedId, CollisionType::END);
+    }
+    if (collider)
+    {
+        collider->GetBody()->GetWorld()->DestroyBody(collider->GetBody());
+        collider.reset();
+    }
+    if (hasGroundedEntity)
+    {
+        world->DestroyEntity(groundedId);
+        hasGroundedEntity = false;
+        groundedId = {};
+    }
+    if (healthBar)
+    {
+        healthBar->CleanUp();
+    }
     GameObject::CleanUp();
 }
 

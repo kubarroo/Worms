@@ -24,7 +24,7 @@ public:
 	~WeaponManager();
 private:
 	SDL_Renderer* renderer;
-	Weapon* weapon;
+	Weapon* weapon = nullptr;
 	int currentWeapon = 0;
 	std::vector<WeaponImpl*> weapons;
 	std::map<std::string, Sound*> sounds;

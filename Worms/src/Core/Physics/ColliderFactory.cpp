@@ -12,7 +12,7 @@ Collider ColliderFactory::CreateTriggerBody(b2Shape* shape, b2Vec2 position,
     b2BodyDef bodyDef;
     bodyDef.type = b2_kinematicBody;
     bodyDef.fixedRotation = true;
-    b2Body* body = physicsWorld->CreateBody(&bodyDef);
+    b2Body* body = GetPhysicsWorld()->CreateBody(&bodyDef);
     CreateTriggerFixture(body, shape, info);
 
     return Collider(body, info);
@@ -26,7 +26,7 @@ Collider ColliderFactory::CreateDynamicBody(b2Shape* shape, b2Vec2 position,
     bodyDef.type = b2_dynamicBody;
     bodyDef.angularDamping = 1.0f;
     bodyDef.userData.pointer = userData;
-    b2Body* body = physicsWorld->CreateBody(&bodyDef);
+    b2Body* body = GetPhysicsWorld()->CreateBody(&bodyDef);
     CreateDynamicFixture(body, shape, info);
 
     return std::move(Collider(body, info));
@@ -38,7 +38,7 @@ Collider ColliderFactory::CreateKineticBody(b2Shape* shape, b2Vec2 position,
     b2BodyDef bodyDef;
     bodyDef.type = b2_kinematicBody;
     bodyDef.fixedRotation = true;
-    b2Body* body = physicsWorld->CreateBody(&bodyDef);
+    b2Body* body = GetPhysicsWorld()->CreateBody(&bodyDef);
     CreateKineticFixture(body, shape, info);
 
     return Collider(body, info);
@@ -50,7 +50,7 @@ Collider ColliderFactory::CreateStaticBody(b2Shape* shape, b2Vec2 position, cons
     bodyDef.type = b2_staticBody;
     bodyDef.fixedRotation = true;
     bodyDef.position = position;
-    b2Body* body = physicsWorld->CreateBody(&bodyDef);
+    b2Body* body = GetPhysicsWorld()->CreateBody(&bodyDef);
     CreateStaticFixture(body, shape, info);
 
     return Collider(body, info);

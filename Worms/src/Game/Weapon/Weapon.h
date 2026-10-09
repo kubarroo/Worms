@@ -1,5 +1,6 @@
 #pragma once
 #include <vector>
+#include <optional>
 #include "Core/Camera/Camera.h"
 #include "Core/GameObject.h"
 #include "Game/Components.h"
@@ -16,6 +17,7 @@ public:
 	void Render() override;
 	void Activate() { canShoot = true; }
 	void SetParent( EntityId newParent ) { parentId = newParent; }
+	void ClearParent() { parentId.reset(); force = 0; }
 	void SetParams( WeaponImpl params ) { weaponParams = params; }
 	void SetTexture( SDL_Texture* texture ) { world->GetComponent<Sprite>( objectId ).texture = texture; }
 	void SetExplosionSound( Sound* sound ) { explosionSound = sound; }
@@ -24,14 +26,14 @@ public:
 	void SetProjectileTexture( SDL_Texture* texture ) { projTexture = texture; }
 
 private:
-	EntityId parentId;
+	std::optional<EntityId> parentId;
 	float force = 0;
 	bool canShoot = true;
-	SDL_Texture* powerBar;
-	SDL_Texture* projTexture;
-	Sound* explosionSound;
-	Sound* collisionSound;
-	Sound* shootingSound;
+	SDL_Texture* powerBar = nullptr;
+	SDL_Texture* projTexture = nullptr;
+	Sound* explosionSound = nullptr;
+	Sound* collisionSound = nullptr;
+	Sound* shootingSound = nullptr;
 
 	Camera& camera;
 	WeaponImpl weaponParams;

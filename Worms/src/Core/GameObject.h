@@ -2,6 +2,7 @@
 #include "ECS/ECS_Types.h"
 #include "ECS/World.h"
 #include "SDL2/SDL.h"
+#include <stdexcept>
 #include <vector>
 
 
@@ -15,15 +16,27 @@ public:
 
     EntityId GetId() const
     {
+        if (!hasEntity)
+        {
+            throw std::logic_error("GameObject has no entity");
+        }
         return objectId;
+    }
+
+    bool HasEntity() const
+    {
+        return hasEntity;
     }
 
     static std::vector<std::unique_ptr<GameObject>> activeObjs;
     static std::vector<std::unique_ptr<GameObject>> objsToAdd;
     static std::vector<GameObject*> objsToDelete;
 
+    virtual ~GameObject() = default;
+
 protected:
-    EntityId objectId;
+    EntityId objectId{};
+    bool hasEntity = false;
     World* world = nullptr;
     SDL_Renderer* renderer = nullptr;
 };
