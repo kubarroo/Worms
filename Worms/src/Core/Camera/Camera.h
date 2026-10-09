@@ -7,17 +7,9 @@
 class Camera : public GameObject
 {
 public:
-    float& X()
-    {
-        return GetPosition().x;
-    };
     float X() const
     {
         return GetPosition().x;
-    };
-    float& Y()
-    {
-        return GetPosition().y;
     };
     float Y() const
     {

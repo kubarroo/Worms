@@ -14,7 +14,7 @@ HealthBar::HealthBar(SDL_Renderer* renderer, World* world, EntityId newParentId,
 
         world->AddComponent<Position>(objectId, {0, 0});
         world->AddComponent<Health>(objectId, {100, 100});
-        world->AddComponent<Follow>(objectId, {newParentId, 0.0, 0.3});
+        world->AddComponent<Follow>(objectId, {world->GetHandle(newParentId), 0.0, 0.3});
         healthBar = texture;
         SDL_CHECK(healthBar);
     }

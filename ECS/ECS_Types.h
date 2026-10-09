@@ -9,6 +9,15 @@
 #define MAX_SYSTEMS 16
 
 typedef uint16_t EntityId;
+class EntityManager;
+// Observers validate this handle against its original, still-living world before use.
+struct EntityHandle
+{
+    EntityId id = 0;
+    uint64_t generation = 0;
+    const EntityManager* owner = nullptr;
+    bool operator==(const EntityHandle&) const = default;
+};
 typedef uint8_t ComponentType;
 typedef std::bitset<MAX_COMPONENTS> Signature;
 

@@ -15,6 +15,12 @@ public:
 
     EntityId CreateEntity();
     void DestroyEntity(const EntityId ent);
+    bool IsAlive(EntityId ent) const { return entManager.IsAlive(ent); }
+    bool IsAlive(EntityHandle handle) const { return entManager.IsAlive(handle); }
+    std::optional<EntityHandle> GetHandle(EntityId ent) const
+    {
+        return entManager.GetHandle(ent);
+    }
 
     uint16_t GetAmountOfAvailableEntities() const
     {
@@ -32,7 +38,7 @@ public:
     template <typename Component> Component& GetComponent(const EntityId ent);
     template <typename Component>
     std::optional<std::reference_wrapper<Component>> TryGetComponent(const EntityId ent);
-    template <typename Component> Component RemoveComponent(const EntityId ent);
+    template <typename Component> void RemoveComponent(const EntityId ent);
 
     void Update();
     void Render();
@@ -81,12 +87,13 @@ template <typename Component> Component& World::GetComponent(const EntityId ent)
 template <typename Component>
 std::optional<std::reference_wrapper<Component>> World::TryGetComponent(const EntityId ent)
 {
+    if (!IsAlive(ent)) return {};
     return comManager.TryGetComponent<Component>(ent);
 }
 
-template <typename Component> Component World::RemoveComponent(const EntityId ent)
+template <typename Component> void World::RemoveComponent(const EntityId ent)
 {
     Signature newSign = entManager.DeleteFromSignature(ent, comManager.GetComponentId<Component>());
     sysManager.OnSignatureChange(ent, newSign);
-    return comManager.RemoveComponent<Component>(ent);
+    comManager.RemoveComponent<Component>(ent);
 }

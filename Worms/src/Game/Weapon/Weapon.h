@@ -25,7 +25,10 @@ public:
     }
     void SetParent(EntityId newParent)
     {
-        parentId = newParent;
+        const auto newHandle = HasEntity() ? world->GetHandle(newParent) : std::nullopt;
+        if (parentId == newHandle) return;
+        ClearParent();
+        parentId = newHandle;
     }
     void ClearParent()
     {
@@ -63,7 +66,9 @@ public:
     }
 
 private:
-    std::optional<EntityId> parentId;
+    friend struct WeaponTestAccess;
+    std::optional<Position> GetParentPosition();
+    std::optional<EntityHandle> parentId;
     float force = 0;
     bool canShoot = true;
     TexturePtr powerBar;

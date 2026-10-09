@@ -10,6 +10,8 @@ static_assert(!std::is_copy_constructible_v<GameObject>);
 static_assert(!std::is_copy_assignable_v<GameObject>);
 static_assert(!std::is_move_constructible_v<GameObject>);
 static_assert(!std::is_move_assignable_v<GameObject>);
+static_assert(!std::is_reference_v<decltype(std::declval<Camera&>().X())>);
+static_assert(!std::is_reference_v<decltype(std::declval<Camera&>().Y())>);
 
 TEST(HandleSafety, EntityZeroIsValidAndCleanupCanBeRepeated)
 {
@@ -43,7 +45,7 @@ TEST(HandleSafety, FocusPointCanHaveNoTargetOrTargetEntityZero)
     EXPECT_FALSE(focus.GetPos());
     focus.ChangeTarget(target);
     ASSERT_TRUE(focus.GetPos());
-    EXPECT_FLOAT_EQ(focus.GetPos()->get().x, 3);
+    EXPECT_FLOAT_EQ(focus.GetPos()->x, 3);
     focus.ClearTarget();
     EXPECT_FALSE(focus.GetPos());
     focus.ChangeTarget(target);
@@ -83,7 +85,7 @@ TEST(HandleSafety, SystemsAcceptEmptyBodyAndMissingFollowTarget)
     world->RegisterComponent<Rotation>();
     world->RegisterComponent<Follow>();
     world->RegisterSystem<PhysicsSynchronizer>();
-    world->RegisterSystem<TargetSystem>();
+    world->RegisterSystem<TargetSystem>(*world);
     const auto entity = world->CreateEntity();
     world->AddComponent<Position>(entity, {5, 6});
     world->AddComponent<RigidBody>(entity);
@@ -93,10 +95,88 @@ TEST(HandleSafety, SystemsAcceptEmptyBodyAndMissingFollowTarget)
 
     const auto target = world->CreateEntity();
     world->AddComponent<Position>(target, {1, 2});
-    world->GetComponent<Follow>(entity).id = target;
+    world->GetComponent<Follow>(entity).id = world->GetHandle(target);
     world->Update();
     EXPECT_FLOAT_EQ(world->GetComponent<Position>(entity).x, 1);
     world->DestroyEntity(target);
     EXPECT_NO_THROW(world->Update());
     EXPECT_FALSE(world->GetComponent<Follow>(entity).id);
+}
+
+TEST(HandleSafety, HandlesRejectReusedSlotsAndForeignWorlds)
+{
+    auto world = std::make_unique<World>(nullptr);
+    auto otherWorld = std::make_unique<World>(nullptr);
+    world->RegisterComponent<Position>();
+    const auto target = world->CreateEntity();
+    ASSERT_EQ(target, 0);
+    world->AddComponent<Position>(target, {1, 2});
+    const auto handle = world->GetHandle(target);
+    ASSERT_TRUE(handle);
+    EXPECT_TRUE(world->IsAlive(*handle));
+    otherWorld->CreateEntity();
+    EXPECT_FALSE(otherWorld->IsAlive(*handle));
+    EXPECT_FALSE(world->IsAlive(EntityHandle{}));
+    EXPECT_FALSE(world->GetHandle(static_cast<EntityId>(MAX_ENTITIES)));
+
+    while (world->GetAmountOfAvailableEntities()) world->CreateEntity();
+    EXPECT_THROW(world->CreateEntity(), std::runtime_error);
+    world->DestroyEntity(target);
+    world->DestroyEntity(target);
+    EXPECT_EQ(world->GetAmountOfAvailableEntities(), 1);
+    EXPECT_FALSE(world->IsAlive(*handle));
+    const auto replacement = world->CreateEntity();
+    ASSERT_EQ(replacement, target);
+    EXPECT_FALSE(world->IsAlive(*handle));
+    EXPECT_TRUE(world->IsAlive(*world->GetHandle(replacement)));
+    EXPECT_FALSE(world->TryGetComponent<Position>(replacement));
+    // A stale signature would make this second destruction erase a missing component.
+    EXPECT_NO_THROW(world->DestroyEntity(replacement));
+    EXPECT_EQ(world->GetAmountOfAvailableEntities(), 1);
+}
+
+TEST(HandleSafety, ObserversClearMissingPositionAndDoNotResumeAfterItIsAddedBack)
+{
+    auto world = std::make_unique<World>(nullptr);
+    world->RegisterComponent<Position>();
+    world->RegisterComponent<Follow>();
+    world->RegisterSystem<TargetSystem>(*world);
+    const auto target = world->CreateEntity();
+    world->AddComponent<Position>(target, {1, 2});
+    const auto follower = world->CreateEntity();
+    world->AddComponent<Position>(follower, {5, 6});
+    world->AddComponent<Follow>(follower, {world->GetHandle(target), 0, 0});
+    FocusPoint focus(nullptr, world.get());
+    focus.ChangeTarget(target);
+    const auto snapshot = focus.GetPos();
+    ASSERT_TRUE(snapshot);
+    world->RemoveComponent<Position>(target);
+    EXPECT_TRUE(world->IsAlive(target));
+    EXPECT_FALSE(focus.GetPos());
+    world->Update();
+    EXPECT_FALSE(world->GetComponent<Follow>(follower).id);
+    world->AddComponent<Position>(target, {9, 10});
+    EXPECT_FALSE(focus.GetPos());
+    world->Update();
+    EXPECT_FLOAT_EQ(world->GetComponent<Position>(follower).x, 5);
+    EXPECT_FLOAT_EQ(snapshot->x, 1);
+    focus.CleanUp();
+}
+
+TEST(HandleSafety, FocusPointResolvesPositionAfterAnotherComponentIsCompacted)
+{
+    auto world = std::make_unique<World>(nullptr);
+    world->RegisterComponent<Position>();
+    const auto other = world->CreateEntity();
+    world->AddComponent<Position>(other, {9, 10});
+    const auto target = world->CreateEntity();
+    world->AddComponent<Position>(target, {1, 2});
+    FocusPoint focus(nullptr, world.get());
+    focus.ChangeTarget(target);
+    world->DestroyEntity(other);
+    ASSERT_TRUE(focus.GetPos());
+    EXPECT_FLOAT_EQ(focus.GetPos()->x, 1);
+    world->GetComponent<Position>(target).x = 3;
+    EXPECT_FLOAT_EQ(focus.GetPos()->x, 3);
+    focus.CleanUp();
 }

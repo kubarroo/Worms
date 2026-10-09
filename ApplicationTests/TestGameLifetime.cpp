@@ -7,6 +7,7 @@
 #include "Game/Player/WormTeam.h"
 #include "Game/Weapon/Projectile.h"
 #include <SDL_mixer.h>
+#include <box2d/b2_circle_shape.h>
 #include <gtest/gtest.h>
 #include <memory>
 #include <optional>
@@ -41,6 +42,13 @@ struct MapTestAccess
         catch (...) { map.renderer = renderer; throw; }
         map.renderer = renderer;
     }
+};
+
+struct WeaponTestAccess
+{
+    static bool HasParent(const Weapon& weapon) { return weapon.parentId.has_value(); }
+    static float Charge(const Weapon& weapon) { return weapon.force; }
+    static void SetCharge(Weapon& weapon) { weapon.force = 0.5f; }
 };
 
 namespace
@@ -643,6 +651,114 @@ TEST_F(GameLifetime, RepeatedObjectLifecyclesRestoreEntitiesBodiesAndSubscriptio
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
     }
+}
+
+TEST_F(GameLifetime, MapReacquiresComponentsAfterBodyDestructionCallbacksCompactThem)
+{
+    auto& world = game.Registry();
+    const auto earlier = world.CreateEntity();
+    world.AddComponent<Sprite>(earlier);
+    world.AddComponent<RigidBody>(earlier);
+    Map map(&game.Physics());
+    map.Initialise(game.Renderer(), &world);
+
+    b2BodyDef bodyDef;
+    bodyDef.type = b2_dynamicBody;
+    bodyDef.position.Set(1.5f, -2.f);
+    auto* sensor = game.Physics().CreateBody(&bodyDef);
+    b2CircleShape shape;
+    shape.m_radius = 100.f;
+    b2FixtureDef fixtureDef;
+    fixtureDef.shape = &shape;
+    fixtureDef.isSensor = true;
+    sensor->CreateFixture(&fixtureDef);
+    int callbacks = 0;
+    const auto subscription = ContactManager::Get().AddEvent(map.GetId(), CollisionType::END,
+        [&](b2Contact*)
+        {
+            ++callbacks;
+            world.DestroyEntity(earlier);
+        });
+    game.Physics().Step(1.f / 60, 8, 3);
+    MapTestAccess::RequestRebuild(map);
+    EXPECT_NO_THROW(map.Update());
+    EXPECT_GT(callbacks, 0);
+    EXPECT_FALSE(world.IsAlive(earlier));
+    EXPECT_NE(world.GetComponent<Sprite>(map.GetId()).texture, nullptr);
+    EXPECT_NE(world.GetComponent<RigidBody>(map.GetId()).body, nullptr);
+    EXPECT_NO_THROW(ContactManager::Get().RethrowPendingException());
+    ContactManager::Get().RemoveEvent(subscription);
+    map.CleanUp();
+    game.Physics().DestroyBody(sensor);
+}
+
+TEST_F(GameLifetime, ObserversRejectAReusedTargetBeforeTheirNextUpdate)
+{
+    auto& world = game.Registry();
+    const auto target = world.CreateEntity();
+    world.AddComponent<Position>(target, {1, 2});
+    const auto follower = world.CreateEntity();
+    world.AddComponent<Position>(follower, {5, 6});
+    world.AddComponent<Follow>(follower, {world.GetHandle(target), 0, 0});
+    FocusPoint focus(game.Renderer(), &world);
+    focus.ChangeTarget(target);
+    camera->ChangeTarget(target);
+    weapon->SetParent(target);
+    WeaponTestAccess::SetCharge(*weapon);
+    const auto pending = GameObject::objsToAdd.size();
+    while (world.GetAmountOfAvailableEntities()) world.CreateEntity();
+    world.DestroyEntity(target);
+    const auto replacement = world.CreateEntity();
+    ASSERT_EQ(replacement, target);
+    world.AddComponent<Position>(replacement, {20, 30});
+
+    EXPECT_FALSE(focus.GetPos());
+    const auto cameraX = camera->X();
+    const auto cameraY = camera->Y();
+    camera->Update();
+    EXPECT_FLOAT_EQ(camera->X(), cameraX);
+    EXPECT_FLOAT_EQ(camera->Y(), cameraY);
+    weapon->Update();
+    EXPECT_FALSE(WeaponTestAccess::HasParent(*weapon));
+    EXPECT_FLOAT_EQ(WeaponTestAccess::Charge(*weapon), 0);
+    EXPECT_EQ(GameObject::objsToAdd.size(), pending);
+    world.Update();
+    EXPECT_FALSE(world.GetComponent<Follow>(follower).id);
+    EXPECT_FLOAT_EQ(world.GetComponent<Position>(follower).x, 5);
+    focus.CleanUp();
+}
+
+TEST_F(GameLifetime, SettingTheSameWeaponParentPreservesChargeButChangingItResetsCharge)
+{
+    auto& world = game.Registry();
+    const auto first = world.CreateEntity();
+    const auto second = world.CreateEntity();
+    world.AddComponent<Position>(first, {1, 2});
+    world.AddComponent<Position>(second, {3, 4});
+    weapon->SetParent(first);
+    WeaponTestAccess::SetCharge(*weapon);
+    weapon->SetParent(first);
+    EXPECT_FLOAT_EQ(WeaponTestAccess::Charge(*weapon), 0.5f);
+    weapon->SetParent(second);
+    EXPECT_FLOAT_EQ(WeaponTestAccess::Charge(*weapon), 0);
+    EXPECT_TRUE(WeaponTestAccess::HasParent(*weapon));
+}
+
+TEST_F(GameLifetime, WeaponRenderClearsMissingParentPositionEvenWhileInactive)
+{
+    auto& world = game.Registry();
+    const auto target = world.CreateEntity();
+    world.AddComponent<Position>(target, {1, 2});
+    weapon->SetParent(target);
+    weapon->Deactivate();
+    WeaponTestAccess::SetCharge(*weapon);
+    world.RemoveComponent<Position>(target);
+    // A render attempt would fail if it tried to read the weapon's components.
+    world.RemoveComponent<Position>(weapon->GetId());
+    EXPECT_NO_THROW(weapon->Render());
+    EXPECT_FALSE(WeaponTestAccess::HasParent(*weapon));
+    EXPECT_FLOAT_EQ(WeaponTestAccess::Charge(*weapon), 0);
+    EXPECT_NO_THROW(weapon->Update());
 }
 
 TEST_F(GameLifetime, SurfaceOwnershipMovesAndLocksAreReleasedAfterException)

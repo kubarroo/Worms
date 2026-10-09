@@ -9,6 +9,7 @@ EntityId World::CreateEntity()
 
 void World::DestroyEntity(const EntityId ent)
 {
+    if (!IsAlive(ent)) return;
     comManager.RemoveAllComponents(ent, entManager.GetSignature(ent));
     entManager.DestroyEntity(ent);
     sysManager.UnsubscribeEntity(ent);
@@ -16,8 +17,8 @@ void World::DestroyEntity(const EntityId ent)
 
 EntityId World::CopyEntity(const EntityId toCopy)
 {
-    EntityId newId = entManager.CreateEntity();
     Signature toCopySign = entManager.GetSignature(toCopy);
+    EntityId newId = entManager.CreateEntity();
     entManager.SetSignature(newId, toCopySign);
     comManager.AddComponents(newId, toCopySign);
     sysManager.OnSignatureChange(newId, toCopySign); // Maybe could be optimised

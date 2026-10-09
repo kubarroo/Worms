@@ -110,7 +110,8 @@ private:
 class TargetSystem : public System
 {
 public:
-    TargetSystem(ComponentManager& componentManager) : System(componentManager)
+    TargetSystem(ComponentManager& componentManager, World& world)
+        : System(componentManager), world(world)
     {
         systemSignature.set(componentManager.GetComponentId<Follow>(), true);
         systemSignature.set(componentManager.GetComponentId<Position>(), true);
@@ -127,19 +128,25 @@ public:
             {
                 continue;
             }
-            auto targetComponent = positions.TryGetData(*target.id);
+            if (!world.IsAlive(*target.id))
+            {
+                target.id.reset();
+                continue;
+            }
+            auto targetComponent = positions.TryGetData(target.id->id);
             if (!targetComponent)
             {
                 target.id.reset();
                 continue;
             }
-            auto& targetPosition = targetComponent->get();
+            const auto targetPosition = targetComponent->get();
             positions.GetData(ent).x = targetPosition.x + target.offsetX;
             positions.GetData(ent).y = targetPosition.y + target.offsetY;
         }
     }
 
 private:
+    World& world;
 };
 
 class ParticleUpdater : public System

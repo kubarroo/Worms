@@ -44,7 +44,7 @@ void Game::InitWindow(const std::string& title, const int width, const int heigh
     registerComponents();
     world->RegisterSystem<Movement>();
     world->RegisterSystem<PhysicsSynchronizer>();
-    world->RegisterSystem<TargetSystem>();
+    world->RegisterSystem<TargetSystem>(*world);
     world->RegisterSystem<ParticleUpdater>();
     auto camera = std::make_unique<Camera>();
     auto cameraPtr = camera.get();

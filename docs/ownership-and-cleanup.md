@@ -8,6 +8,8 @@ Podstawą jest wcześniejszy przegląd projektu. Podczas tworzenia dokumentu nar
 
 ## Reguły własności
 
+Zasady krótkotrwałego dostępu do komponentów, ważności uchwytów encji i ograniczeń callbacków opisuje dokument [Bezpieczne odwołania do encji i komponentów ECS](ecs-reference-safety.md).
+
 - Każdy zasób ma jednego jawnego właściciela odpowiedzialnego za zwolnienie.
 - Pole przechowywane przez wartość albo unique_ptr oznacza własność. Surowy wskaźnik lub referencja oznacza dostęp bez prawa do usuwania.
 - Współdzielony dostęp do tekstury lub dźwięku nie wymaga automatycznie shared_ptr. Właściciel musi żyć dłużej niż wszyscy użytkownicy zasobu.

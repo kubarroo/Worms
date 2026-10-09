@@ -39,19 +39,31 @@ void Weapon::CleanUp()
     powerBar.reset();
 }
 
-void Weapon::Update()
+std::optional<Position> Weapon::GetParentPosition()
 {
-	if ( !HasEntity() || !canShoot || !parentId ) return;
-	auto parentPosition = world->TryGetComponent<Position>( *parentId );
+	if (!HasEntity() || !parentId) return {};
+	if (!world->IsAlive(*parentId))
+	{
+		ClearParent();
+		return {};
+	}
+	auto parentPosition = world->TryGetComponent<Position>(parentId->id);
 	if ( !parentPosition )
 	{
 		ClearParent();
-		return;
+		return {};
 	}
+	return parentPosition->get();
+}
+
+void Weapon::Update()
+{
+	auto parentPosition = GetParentPosition();
+	if (!parentPosition || !canShoot) return;
 
 	auto& pos = world->GetComponent<Position>( objectId );
 	auto& rot = world->GetComponent<Rotation>( objectId );
-	pos = parentPosition->get();
+	pos = *parentPosition;
 
 	rot.degree += Input::Get().Vertical() * static_cast<float>(Time::deltaTime) * 100.f;
 
@@ -92,7 +104,7 @@ void Weapon::Update()
 
 void Weapon::Render()
 {
-	if ( !HasEntity() || !powerBar || !parentId ) return;
+	if (!GetParentPosition() || !powerBar) return;
 	auto& pos = world->GetComponent<Position>( objectId );
 	auto& rot = world->GetComponent<Rotation>( objectId );
 	SDL_Point size;

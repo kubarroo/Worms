@@ -56,7 +56,7 @@ void Camera::Update()
     auto targetPosition = focusPoint->GetPos();
     if (targetPosition.has_value())
     {
-        ChangePos(adjustPos(targetPosition->get(), GetPosition()));
+        ChangePos(adjustPos(*targetPosition, GetPosition()));
         timer.Reset();
     }
     else if (timer.Measure() > 1.5 && noTargetEvent)

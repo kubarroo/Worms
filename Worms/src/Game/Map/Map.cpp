@@ -50,10 +50,9 @@ void Map::Update()
     DestroyMapAtLocalPoint(GlobalToLocalPos(mapPos));
     Sdl::TexturePtr texture(SDL_CreateTextureFromSurface(renderer, physTex->surface.get()));
     SDL_CHECK(texture.get());
-    auto& sprite = world->GetComponent<Sprite>(objectId);
     CreateNewColliders();
 
-    sprite.texture = texture.get();
+    world->GetComponent<Sprite>(objectId).texture = texture.get();
     mapTexture = std::move(texture);
     destroyed = false;
 }
@@ -145,7 +144,6 @@ void Map::CreateNewColliders()
         return false;
     });
 
-    auto& body = world->GetComponent<RigidBody>(objectId).body;
     b2Body* replacement = nullptr;
     if (!physPoints.empty())
     {
@@ -165,13 +163,12 @@ void Map::CreateNewColliders()
         }
     }
 
-    if (body)
+    if (mapBody)
     {
-        physicsWorld->DestroyBody(body);
-        body = nullptr;
+        physicsWorld->DestroyBody(mapBody);
     }
-    body = replacement;
     mapBody = replacement;
+    world->GetComponent<RigidBody>(objectId).body = replacement;
     physTex->points = std::move(physPoints);
 }
 

@@ -16,21 +16,32 @@ public:
     }
     void ChangeTarget(EntityId newTargetId)
     {
-        target = newTargetId;
+        target = HasEntity() ? world->GetHandle(newTargetId) : std::nullopt;
     }
     void ClearTarget()
     {
         target.reset();
     }
-    std::optional<std::reference_wrapper<Position>> GetPos() const
+    std::optional<Position> GetPos()
     {
         if (!HasEntity() || !target)
         {
             return {};
         }
-        return world->TryGetComponent<Position>(*target);
+        if (!world->IsAlive(*target))
+        {
+            ClearTarget();
+            return {};
+        }
+        auto position = world->TryGetComponent<Position>(target->id);
+        if (!position)
+        {
+            ClearTarget();
+            return {};
+        }
+        return position->get();
     };
 
 private:
-    std::optional<EntityId> target;
+    std::optional<EntityHandle> target;
 };

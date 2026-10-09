@@ -43,7 +43,7 @@ struct Health
 
 struct Follow
 {
-    std::optional<EntityId> id;
+    std::optional<EntityHandle> id;
     float offsetX = 0.f;
     float offsetY = 0.f;
 };
