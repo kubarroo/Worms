@@ -19,6 +19,7 @@ public:
     void Initialise(SDL_Renderer* newRenderer, World* newWorld) final;
 
 private:
+    friend struct ParticleSystemTestAccess;
     float easeOutCubic(float x);
     float startPosX, startPosY;
     std::string particleImg;

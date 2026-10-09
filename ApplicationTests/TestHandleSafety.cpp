@@ -13,6 +13,21 @@ static_assert(!std::is_move_assignable_v<GameObject>);
 static_assert(!std::is_reference_v<decltype(std::declval<Camera&>().X())>);
 static_assert(!std::is_reference_v<decltype(std::declval<Camera&>().Y())>);
 
+namespace
+{
+class ScopedSdlTimer
+{
+public:
+    ScopedSdlTimer() : result(SDL_Init(SDL_INIT_TIMER)) {}
+    ~ScopedSdlTimer() { SDL_Quit(); }
+    int Result() const { return result; }
+    ScopedSdlTimer(const ScopedSdlTimer&) = delete;
+    ScopedSdlTimer& operator=(const ScopedSdlTimer&) = delete;
+private:
+    int result;
+};
+}
+
 TEST(HandleSafety, EntityZeroIsValidAndCleanupCanBeRepeated)
 {
     auto world = std::make_unique<World>(nullptr);
@@ -57,6 +72,8 @@ TEST(HandleSafety, FocusPointCanHaveNoTargetOrTargetEntityZero)
 
 TEST(HandleSafety, CameraReadsItsPositionAfterComponentCompaction)
 {
+    ScopedSdlTimer timer;
+    ASSERT_EQ(timer.Result(), 0) << SDL_GetError();
     auto world = std::make_unique<World>(nullptr);
     world->RegisterComponent<Position>();
     const auto other = world->CreateEntity();

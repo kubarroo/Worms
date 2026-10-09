@@ -4,6 +4,7 @@ file(GLOB_RECURSE WORMS_TEST_GAME_SOURCES CONFIGURE_DEPENDS
 list(FILTER WORMS_TEST_GAME_SOURCES EXCLUDE REGEX "/Core/Initialization/EntryPoint\\.cpp$")
 
 add_executable(worms_tests
+    TestMain.cpp
     TestColliderFromSprite.cpp
     TestHandleSafety.cpp
     TestCleanupSafety.cpp
@@ -14,7 +15,7 @@ target_include_directories(worms_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/Worms/src"
 )
 target_link_libraries(worms_tests PRIVATE
-    GTest::gtest_main SDL2::SDL2 box2d worms_ecs worms_imgui
+    GTest::gtest SDL2::SDL2 box2d worms_ecs worms_imgui
     $<IF:$<TARGET_EXISTS:SDL2_image::SDL2_image>,SDL2_image::SDL2_image,SDL2_image::SDL2_image-static>
     $<IF:$<TARGET_EXISTS:SDL2_mixer::SDL2_mixer>,SDL2_mixer::SDL2_mixer,SDL2_mixer::SDL2_mixer-static>
 )

@@ -34,6 +34,17 @@ struct MapTestAccess
         map.bulltetPos = {0, 0};
     }
     static bool HasPendingRebuild(const Map& map) { return map.destroyed; }
+    static int OwnedResources(const Map& map)
+    {
+        return static_cast<bool>(map.mapTexture) +
+               static_cast<bool>(map.physTex && map.physTex->surface);
+    }
+    static void RequestDeformation(Map& map, Position point, float radius)
+    {
+        map.destroyed = true;
+        map.bulltetPos = point;
+        map.destructionRadius = radius;
+    }
     static void UpdateWithoutRenderer(Map& map)
     {
         auto* renderer = map.renderer;
@@ -46,13 +57,51 @@ struct MapTestAccess
 
 struct WeaponTestAccess
 {
+    static int OwnedResources(const Weapon& weapon) { return static_cast<bool>(weapon.powerBar); }
     static bool HasParent(const Weapon& weapon) { return weapon.parentId.has_value(); }
     static float Charge(const Weapon& weapon) { return weapon.force; }
     static void SetCharge(Weapon& weapon) { weapon.force = 0.5f; }
 };
 
+struct ParticleSystemTestAccess
+{
+    static int OwnedResources(const ParticleSystem& particles)
+    {
+        return static_cast<bool>(particles.texture);
+    }
+    static std::size_t ParticleCount(const ParticleSystem& particles)
+    {
+        return particles.particles.size();
+    }
+};
+
 namespace
 {
+class ScopedDeltaTime
+{
+public:
+    explicit ScopedDeltaTime(double value) : previous(Time::deltaTime) { Time::deltaTime = value; }
+    ~ScopedDeltaTime() { Time::deltaTime = previous; }
+private:
+    double previous;
+};
+
+std::size_t CountOpaquePixels(SDL_Surface* surface)
+{
+    Sdl::SurfaceLock lock(surface);
+    std::size_t count = 0;
+    for (int y = 0; y < surface->h; ++y)
+        for (int x = 0; x < surface->w; ++x)
+        {
+            const auto* row = reinterpret_cast<const Uint32*>(
+                static_cast<const Uint8*>(surface->pixels) + y * surface->pitch);
+            Uint8 r, g, b, a;
+            SDL_GetRGBA(row[x], surface->format, &r, &g, &b, &a);
+            if (a) ++count;
+        }
+    return count;
+}
+
 class ScopedDriverHint
 {
 public:
@@ -127,6 +176,12 @@ protected:
             team.reset();
         }
         game.Clean();
+        EXPECT_FALSE(game.HasResources());
+        EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), 0);
+        EXPECT_FALSE(ContactManager::Get().TakePendingException());
+        EXPECT_TRUE(GameObject::activeObjs.empty());
+        EXPECT_TRUE(GameObject::objsToAdd.empty());
+        EXPECT_TRUE(GameObject::objsToDelete.empty());
     }
 
     void CreateTestTeam()
@@ -607,10 +662,13 @@ TEST_F(GameLifetime, RepeatedObjectLifecyclesRestoreEntitiesBodiesAndSubscriptio
     {
         ParticleSystem particles("blood.png", 1, 0, 0, 4);
         particles.Initialise(game.Renderer(), &game.Registry());
+        EXPECT_EQ(ParticleSystemTestAccess::OwnedResources(particles), 1);
         const auto particleId = particles.GetId();
         EXPECT_THROW(particles.Initialise(game.Renderer(), &game.Registry()), std::logic_error);
         EXPECT_EQ(particles.GetId(), particleId);
         particles.CleanUp();
+        EXPECT_EQ(ParticleSystemTestAccess::OwnedResources(particles), 0);
+        EXPECT_EQ(ParticleSystemTestAccess::ParticleCount(particles), 0);
         EXPECT_NO_THROW(particles.CleanUp());
         EXPECT_NO_THROW(particles.Update());
 
@@ -625,10 +683,12 @@ TEST_F(GameLifetime, RepeatedObjectLifecyclesRestoreEntitiesBodiesAndSubscriptio
 
         Weapon localWeapon(*camera);
         localWeapon.Initialise(game.Renderer(), &game.Registry());
+        EXPECT_EQ(WeaponTestAccess::OwnedResources(localWeapon), 1);
         const auto weaponId = localWeapon.GetId();
         EXPECT_THROW(localWeapon.Initialise(game.Renderer(), &game.Registry()), std::logic_error);
         EXPECT_EQ(localWeapon.GetId(), weaponId);
         localWeapon.CleanUp();
+        EXPECT_EQ(WeaponTestAccess::OwnedResources(localWeapon), 0);
         EXPECT_NO_THROW(localWeapon.CleanUp());
 
         Projectile projectile(0, 2, 0, 0);
@@ -641,15 +701,243 @@ TEST_F(GameLifetime, RepeatedObjectLifecyclesRestoreEntitiesBodiesAndSubscriptio
 
         Map map(&game.Physics());
         map.Initialise(game.Renderer(), &game.Registry());
+        EXPECT_EQ(MapTestAccess::OwnedResources(map), 2);
         const auto mapId = map.GetId();
         EXPECT_THROW(map.Initialise(game.Renderer(), &game.Registry()), std::logic_error);
         EXPECT_EQ(map.GetId(), mapId);
         map.CleanUp();
+        EXPECT_EQ(MapTestAccess::OwnedResources(map), 0);
         EXPECT_NO_THROW(map.CleanUp());
 
         EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
+    }
+}
+
+TEST_F(GameLifetime, ExpiredParticlesAreRemovedThroughTheGameQueueAndRestoreCounts)
+{
+    class ExpiringParticles : public ParticleSystem
+    {
+    public:
+        explicit ExpiringParticles(std::shared_ptr<int> destroyed)
+            : ParticleSystem("blood.png", 1, 100, 100, 4), destroyed(destroyed) {}
+        ~ExpiringParticles() override
+        {
+            EXPECT_FALSE(HasEntity());
+            EXPECT_EQ(ParticleSystemTestAccess::OwnedResources(*this), 0);
+            EXPECT_EQ(ParticleSystemTestAccess::ParticleCount(*this), 0);
+            ++*destroyed;
+        }
+    private:
+        std::shared_ptr<int> destroyed;
+    };
+    ScopedDeltaTime delta(0);
+    const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
+    const auto active = GameObject::activeObjs.size();
+    auto destroyed = std::make_shared<int>(0);
+    for (int cycle = 0; cycle < 10; ++cycle)
+    {
+        SCOPED_TRACE(cycle);
+        auto effect = std::make_unique<ExpiringParticles>(destroyed);
+        auto* pointer = effect.get();
+        GameObject::objsToAdd.emplace_back(std::move(effect));
+        game.Update();
+        const auto handle = game.Registry().GetHandle(pointer->GetId());
+        ASSERT_TRUE(handle);
+        EXPECT_EQ(ParticleSystemTestAccess::ParticleCount(*pointer), 4);
+        EXPECT_EQ(ParticleSystemTestAccess::OwnedResources(*pointer), 1);
+        EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities - 5);
+        {
+            ScopedDeltaTime expire(6);
+            pointer->Update();
+        }
+        EXPECT_EQ(GameObject::objsToDelete.size(), 1);
+        game.Update();
+        EXPECT_FALSE(game.Registry().IsAlive(*handle));
+        EXPECT_EQ(*destroyed, cycle + 1);
+        EXPECT_EQ(GameObject::activeObjs.size(), active);
+        EXPECT_TRUE(GameObject::objsToAdd.empty());
+        EXPECT_TRUE(GameObject::objsToDelete.empty());
+        EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+        EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+        EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
+    }
+}
+
+TEST_F(GameLifetime, ExplosionAndParticleExpiryRestoreCountsAcrossRepeatedGameUpdates)
+{
+    ScopedDeltaTime delta(0);
+    const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
+    const auto active = GameObject::activeObjs.size();
+    for (int cycle = 0; cycle < 5; ++cycle)
+    {
+        SCOPED_TRACE(cycle);
+        auto projectile = std::make_unique<Projectile>(100, -20, 0, 0);
+        projectile->SetExplosionRadius(0.5f);
+        projectile->Initialise(game.Renderer(), &game.Registry());
+        const auto handle = game.Registry().GetHandle(projectile->GetId());
+        ASSERT_TRUE(handle);
+        GameObject::activeObjs.emplace_back(std::move(projectile));
+        game.Update();
+        EXPECT_EQ(GameObject::objsToAdd.size(), 1);
+        EXPECT_EQ(GameObject::objsToDelete.size(), 1);
+        game.Update();
+        EXPECT_FALSE(game.Registry().IsAlive(*handle));
+        EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+        EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
+        EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities - 101);
+        for (const auto& object : GameObject::activeObjs)
+            if (auto* particles = dynamic_cast<ParticleSystem*>(object.get()))
+            {
+                ScopedDeltaTime expire(6);
+                particles->Update();
+            }
+        game.Update();
+        EXPECT_EQ(GameObject::activeObjs.size(), active);
+        EXPECT_TRUE(GameObject::objsToAdd.empty());
+        EXPECT_TRUE(GameObject::objsToDelete.empty());
+        EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+        EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+        EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
+    }
+}
+
+TEST_F(GameLifetime, RepeatedLastTeamDeathsAndTheirParticlesRestoreCounts)
+{
+    ScopedDeltaTime delta(0);
+    const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
+    const auto active = GameObject::activeObjs.size();
+    CreateManager();
+    for (int cycle = 0; cycle < 5; ++cycle)
+    {
+        SCOPED_TRACE(cycle);
+        manager->CreateTeam(1);
+        EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities - 3);
+        EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies + 1);
+        EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions + 3);
+        KillActiveWorm();
+        EXPECT_THROW(manager->GetActiveWormId(), std::logic_error);
+        EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+        EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+        EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
+        EXPECT_EQ(GameObject::objsToAdd.size(), 1);
+        game.Update();
+        for (const auto& object : GameObject::activeObjs)
+            if (auto* particles = dynamic_cast<ParticleSystem*>(object.get()))
+            {
+                ScopedDeltaTime expire(6);
+                particles->Update();
+            }
+        game.Update();
+        EXPECT_EQ(GameObject::activeObjs.size(), active);
+        EXPECT_TRUE(GameObject::objsToAdd.empty());
+        EXPECT_TRUE(GameObject::objsToDelete.empty());
+        EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+        EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+        EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
+    }
+}
+
+TEST_F(GameLifetime, DuplicateDeletionRequestsCleanAndDestroyAnObjectOnlyOnce)
+{
+    class DeletionProbe : public GameObject
+    {
+    public:
+        DeletionProbe(int& cleaned, int& destroyed) : cleaned(cleaned), destroyed(destroyed) {}
+        ~DeletionProbe() override { ++destroyed; }
+        void CleanUp() override { ++cleaned; GameObject::CleanUp(); }
+    private:
+        int& cleaned;
+        int& destroyed;
+    };
+    ScopedDeltaTime delta(0);
+    int cleaned = 0, destroyed = 0;
+    auto object = std::make_unique<DeletionProbe>(cleaned, destroyed);
+    object->Initialise(game.Renderer(), &game.Registry());
+    const auto handle = game.Registry().GetHandle(object->GetId());
+    GameObject::objsToDelete.push_back(object.get());
+    GameObject::objsToDelete.push_back(object.get());
+    GameObject::activeObjs.emplace_back(std::move(object));
+    game.Update();
+    EXPECT_EQ(cleaned, 1);
+    EXPECT_EQ(destroyed, 1);
+    EXPECT_FALSE(game.Registry().IsAlive(*handle));
+    EXPECT_TRUE(GameObject::objsToDelete.empty());
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+}
+
+TEST_F(GameLifetime, RepeatedTerrainDeformationReplacesResourcesWithoutGrowingCounts)
+{
+    Map* map = nullptr;
+    for (const auto& object : GameObject::activeObjs)
+        if (auto* candidate = dynamic_cast<Map*>(object.get())) map = candidate;
+    ASSERT_NE(map, nullptr);
+    auto* surface = MapTestAccess::Surface(*map);
+    ASSERT_EQ(surface->format->BytesPerPixel, 4);
+    const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
+    for (int cycle = 0; cycle < 5; ++cycle)
+    {
+        SCOPED_TRACE(cycle);
+        SDL_Point pixel{-1, -1};
+        {
+            Sdl::SurfaceLock lock(surface);
+            for (int y = 0; y < surface->h && pixel.x < 0; ++y)
+                for (int x = 0; x < surface->w; ++x)
+                {
+                    const auto* row = reinterpret_cast<const Uint32*>(
+                        static_cast<const Uint8*>(surface->pixels) + y * surface->pitch);
+                    Uint8 r, g, b, a;
+                    SDL_GetRGBA(row[x], surface->format, &r, &g, &b, &a);
+                    if (a) { pixel = {x, y}; break; }
+                }
+        }
+        ASSERT_GE(pixel.x, 0);
+        const auto before = CountOpaquePixels(surface);
+        const auto pos = game.Registry().GetComponent<Position>(map->GetId());
+        const Position impact{pos.x + (pixel.x - surface->w / 2) / 100.f,
+                              pos.y - (pixel.y - surface->h / 2) / 100.f};
+        MapTestAccess::RequestDeformation(*map, impact, 0.2f);
+        map->Update();
+        EXPECT_LT(CountOpaquePixels(surface), before);
+        EXPECT_EQ(MapTestAccess::OwnedResources(*map), 2);
+        EXPECT_EQ(SDL_QueryTexture(game.Registry().GetComponent<Sprite>(map->GetId()).texture,
+                                  nullptr, nullptr, nullptr, nullptr), 0);
+        EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+        EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+        EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
+    }
+}
+
+TEST_F(GameLifetime, RepeatedFullGameStartupAndShutdownReleaseSubsystemsAndSubscriptions)
+{
+    const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
+    game.Clean();
+    for (int cycle = 0; cycle < 5; ++cycle)
+    {
+        SCOPED_TRACE(cycle);
+        game.InitWindow("Repeated lifetime test", 800, 600);
+        EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+        EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+        EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
+        auto particles = std::make_unique<ParticleSystem>("blood.png", 1, 0, 0, 4);
+        particles->Initialise(game.Renderer(), &game.Registry());
+        GameObject::activeObjs.emplace_back(std::move(particles));
+        auto projectile = std::make_unique<Projectile>(100, 100, 0, 0);
+        projectile->Initialise(game.Renderer(), &game.Registry());
+        GameObject::activeObjs.emplace_back(std::move(projectile));
+        GameObject::objsToAdd.emplace_back(std::make_unique<ParticleSystem>("blood.png", 1, 0, 0, 2));
+        game.Clean();
+        EXPECT_FALSE(game.HasResources());
+        EXPECT_TRUE(GameObject::activeObjs.empty());
+        EXPECT_TRUE(GameObject::objsToAdd.empty());
+        EXPECT_TRUE(GameObject::objsToDelete.empty());
+        EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), 0);
+        EXPECT_FALSE(ContactManager::Get().TakePendingException());
+        EXPECT_EQ(SDL_WasInit(0), 0);
+        EXPECT_EQ(ImGui::GetCurrentContext(), nullptr);
+        EXPECT_EQ(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+        EXPECT_NO_THROW(game.Clean());
     }
 }
 
