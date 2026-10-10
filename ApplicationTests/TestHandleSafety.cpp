@@ -1,5 +1,6 @@
 #include "Core/Camera/Camera.h"
 #include "Core/GameObject.h"
+#include "Core/Physics/ColliderFactory.h"
 #include "Game/Systems.h"
 #include <box2d/b2_world.h>
 #include <gtest/gtest.h>
@@ -47,7 +48,9 @@ TEST(HandleSafety, EntityZeroIsValidAndCleanupCanBeRepeated)
     auto world = std::make_unique<World>(nullptr);
     b2World physics({0, 0});
     HeadlessCommands commands;
-    const SceneContext context{nullptr, *world, physics, commands};
+    ContactManager contacts;
+    ColliderFactory colliders(physics, contacts);
+    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts};
     world->RegisterComponent<Position>();
     GameObject object;
     EXPECT_FALSE(object.HasEntity());
@@ -71,7 +74,9 @@ TEST(HandleSafety, FocusPointCanHaveNoTargetOrTargetEntityZero)
     auto world = std::make_unique<World>(nullptr);
     b2World physics({0, 0});
     HeadlessCommands commands;
-    const SceneContext context{nullptr, *world, physics, commands};
+    ContactManager contacts;
+    ColliderFactory colliders(physics, contacts);
+    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts};
     world->RegisterComponent<Position>();
     const auto target = world->CreateEntity();
     world->AddComponent<Position>(target, {3, 4});
@@ -97,7 +102,9 @@ TEST(HandleSafety, CameraReadsItsPositionAfterComponentCompaction)
     auto world = std::make_unique<World>(nullptr);
     b2World physics({0, 0});
     HeadlessCommands commands;
-    const SceneContext context{nullptr, *world, physics, commands};
+    ContactManager contacts;
+    ColliderFactory colliders(physics, contacts);
+    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts};
     world->RegisterComponent<Position>();
     const auto other = world->CreateEntity();
     world->AddComponent<Position>(other, {9, 9});
@@ -180,7 +187,9 @@ TEST(HandleSafety, ObserversClearMissingPositionAndDoNotResumeAfterItIsAddedBack
     auto world = std::make_unique<World>(nullptr);
     b2World physics({0, 0});
     HeadlessCommands commands;
-    const SceneContext context{nullptr, *world, physics, commands};
+    ContactManager contacts;
+    ColliderFactory colliders(physics, contacts);
+    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts};
     world->RegisterComponent<Position>();
     world->RegisterComponent<Follow>();
     world->RegisterSystem<TargetSystem>(*world);
@@ -212,7 +221,9 @@ TEST(HandleSafety, FocusPointResolvesPositionAfterAnotherComponentIsCompacted)
     auto world = std::make_unique<World>(nullptr);
     b2World physics({0, 0});
     HeadlessCommands commands;
-    const SceneContext context{nullptr, *world, physics, commands};
+    ContactManager contacts;
+    ColliderFactory colliders(physics, contacts);
+    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts};
     world->RegisterComponent<Position>();
     const auto other = world->CreateEntity();
     world->AddComponent<Position>(other, {9, 10});

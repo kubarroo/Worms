@@ -48,18 +48,22 @@ public:
             throw std::logic_error("Camera has no focus point");
         }
         focusPoint->ChangeTarget(newTargetId);
+        targetLostPending = targetLossReported = false;
     }
     void ClearTarget()
     {
         if (focusPoint)
         {
             focusPoint->ClearTarget();
+            targetLostPending = targetLossReported = false;
         }
     }
 
-    std::function<void()> noTargetEvent = nullptr;
+    bool ConsumeTargetLost() noexcept;
 
 private:
+    bool targetLostPending = false;
+    bool targetLossReported = false;
     float zoom = 1.f;
     bool inputs_enabled = false;
     Position& GetPosition() const;

@@ -15,6 +15,8 @@ Tests in `ApplicationTests/TestGameLifetime.cpp` use SDL `dummy` drivers and the
 | Collision callbacks | Removing the callback's own subscription without removing other listeners, reporting an exception after the physics step |
 | Repeated startup and shutdown | Empty containers and subscription registry, no application resources, and SDL, audio, and ImGui shut down |
 | Partial initialization | Cleanup after failure and safe repeated `CleanUp()` |
+| Scene-local physics | Independent factories and contact registries, equal entity IDs in separate worlds, and cleanup or failed startup of one scene without invalidating another scene's physics |
+| Camera target loss | Existing timeout, a consumable signal, and one turn transition coordinated by the scene |
 
 Repeated cycles compare available entity slots, Box2D bodies, subscriptions, and object queues. Tests also check owned particle-system and weapon textures, and the map texture and surface before and after cleanup. These checks cover selected owners; they are not a global counter of all SDL allocations or proof that no leaks exist.
 
@@ -63,9 +65,27 @@ try {
 
 Headless tests do not replace verification with normal audio and graphics drivers. During gameplay, check worm death, elimination of the last team, explosions on contact, visible terrain deformation, particle fading, and window closure while a projectile and effects are active.
 
-## Execution Status
+## Historical Phase-1 Execution Status
 
 - Before adding tests for this stage, the existing suite was run: **70/70 tests passed**.
 - Six lifetime-cycle tests were added, together with checks of selected resource owners and post-cleanup state. An attempt to build the new changes was stopped by MSVC error `C1902` inside the sandbox; a build outside the sandbox was not approved.
 - The provided `lifetime-crt.log` confirms 10 runs of 76 tests without test failures. The final CRT report contained five blocks totaling 213 bytes. A separate camera test run reproduced 85 bytes of SDL timer state, while initialization failure tests reproduced allocations related to thread data and the error buffer. Diagnostics must be repeated after the runner cleanup changes; the earlier report does not yet confirm that there are no leaks.
 - Results after the latest SDL cleanup fix, the final CRT report, and interactive checks must be recorded separately after they have actually been performed. Earlier passing tests do not replace another diagnostics run.
+
+## Phase-2 Step-4 Verification
+
+- The Debug build of `worms` and `worms_tests` completed successfully. The local
+  MSVC build used `/Z7` to avoid the sandbox's `/Zi` PDB-manager issue.
+- After the factory follow-up fixes, CTest passed **111/111 tests**, including
+  scene-local physics, failed startup of a second scene, camera target-loss
+  signaling, and turn coordination. Two new tests cover initial positions for
+  all four body variants and borrowed metadata for every body/fixture variant.
+  Compile-time assertions verify that all eight factory methods accept named
+  metadata and reject temporary or const metadata arguments.
+- A focused selection of 27 contact and scene-isolation tests passed three
+  shuffled iterations in one process, starting with random seed `12345`.
+- Source checks found no remaining `ContactManager::Get()`,
+  `ColliderFactory::Get()`, or `noTargetEvent` references in gameplay or tests.
+- Interactive gameplay checks, CRT leak diagnostics, and ASan were not repeated
+  for this step. Passing tests do not establish complete memory-leak freedom or
+  full isolation of the still-shared input, rendering, and audio services.

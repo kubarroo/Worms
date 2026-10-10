@@ -1,17 +1,93 @@
 #include "Core/Initialization/App.h"
 #include "Core/ParticleSystem.h"
+#include "Core/Physics/ColliderFactory.h"
 #include "Core/Physics/ContactManager.h"
 #include "Game/Tags.h"
 #include "Game/Weapon/WeaponImpl.h"
 #include <gtest/gtest.h>
-#include <optional>
 #include <memory>
-#include <string>
+#include <optional>
 #include <stdexcept>
+#include <string>
+#include <type_traits>
 #include <vector>
 
 namespace
 {
+template <auto Method, typename... Args>
+constexpr bool BorrowsNamedPhysicsInfo =
+    std::is_invocable_v<decltype(Method), ColliderFactory&, Args..., PhysicsInfo&> &&
+    !std::is_invocable_v<decltype(Method), ColliderFactory&, Args..., PhysicsInfo> &&
+    !std::is_invocable_v<decltype(Method), ColliderFactory&, Args..., const PhysicsInfo&>;
+
+static_assert(BorrowsNamedPhysicsInfo<&ColliderFactory::CreateTriggerBody, b2Shape*, b2Vec2>);
+static_assert(BorrowsNamedPhysicsInfo<&ColliderFactory::CreateKineticBody, b2Shape*, b2Vec2>);
+static_assert(BorrowsNamedPhysicsInfo<&ColliderFactory::CreateStaticBody, b2Shape*, b2Vec2>);
+static_assert(std::is_invocable_v<decltype(&ColliderFactory::CreateDynamicBody),
+              ColliderFactory&, b2Shape*, b2Vec2, PhysicsInfo&, uintptr_t>);
+static_assert(!std::is_invocable_v<decltype(&ColliderFactory::CreateDynamicBody),
+              ColliderFactory&, b2Shape*, b2Vec2, PhysicsInfo, uintptr_t>);
+static_assert(!std::is_invocable_v<decltype(&ColliderFactory::CreateDynamicBody),
+              ColliderFactory&, b2Shape*, b2Vec2, const PhysicsInfo&, uintptr_t>);
+static_assert(BorrowsNamedPhysicsInfo<&ColliderFactory::CreateTriggerFixture, b2Body*, b2Shape*>);
+static_assert(BorrowsNamedPhysicsInfo<&ColliderFactory::CreateDynamicFixture, b2Body*, b2Shape*>);
+static_assert(BorrowsNamedPhysicsInfo<&ColliderFactory::CreateKineticFixture, b2Body*, b2Shape*>);
+static_assert(BorrowsNamedPhysicsInfo<&ColliderFactory::CreateStaticFixture, b2Body*, b2Shape*>);
+
+TEST(ColliderFactorySafety, EveryBodyUsesRequestedPositionAndBorrowedMetadata)
+{
+    ContactManager contacts;
+    PhysicsInfo info{PhysicsTag::NONE, 7};
+    b2World world({0, 0});
+    ColliderFactory factory(world, contacts);
+    b2PolygonShape shape;
+    shape.SetAsBox(0.5f, 0.5f);
+    const b2Vec2 position{3.25f, -4.5f};
+    Collider bodies[] = {
+        factory.CreateTriggerBody(&shape, position, info),
+        factory.CreateDynamicBody(&shape, position, info),
+        factory.CreateKineticBody(&shape, position, info),
+        factory.CreateStaticBody(&shape, position, info)
+    };
+    info.tag = PhysicsTag::WORM;
+    for (auto& collider : bodies)
+    {
+        auto* body = collider.GetBody();
+        EXPECT_FLOAT_EQ(body->GetPosition().x, position.x);
+        EXPECT_FLOAT_EQ(body->GetPosition().y, position.y);
+        ASSERT_NE(body->GetFixtureList(), nullptr);
+        auto* metadata = reinterpret_cast<const PhysicsInfo*>(
+            body->GetFixtureList()->GetUserData().pointer);
+        ASSERT_EQ(metadata, &info);
+        EXPECT_EQ(metadata->tag, PhysicsTag::WORM);
+        EXPECT_EQ(metadata->id, info.id);
+    }
+}
+
+TEST(ColliderFactorySafety, EveryFixtureBorrowsTheSuppliedMetadata)
+{
+    ContactManager contacts;
+    PhysicsInfo info{PhysicsTag::NONE, 7};
+    b2World world({0, 0});
+    ColliderFactory factory(world, contacts);
+    b2BodyDef bodyDef;
+    auto* body = world.CreateBody(&bodyDef);
+    b2PolygonShape shape;
+    shape.SetAsBox(0.5f, 0.5f);
+    b2Fixture* fixtures[] = {
+        factory.CreateTriggerFixture(body, &shape, info),
+        factory.CreateDynamicFixture(body, &shape, info),
+        factory.CreateKineticFixture(body, &shape, info),
+        factory.CreateStaticFixture(body, &shape, info)
+    };
+    for (auto* fixture : fixtures)
+    {
+        ASSERT_NE(fixture, nullptr);
+        EXPECT_EQ(fixture->GetUserData().pointer, reinterpret_cast<uintptr_t>(&info));
+    }
+    EXPECT_TRUE(fixtures[0]->IsSensor());
+}
+
 TEST(CleanupSafety, WeaponConfigurationIsDestroyedThroughItsBase)
 {
     struct TestConfiguration : WeaponImpl
@@ -105,8 +181,7 @@ class ContactCleanup : public testing::Test
 protected:
     void SetUp() override
     {
-        ContactManager::Get().ClearAll();
-        world.SetContactListener(&ContactManager::Get());
+        world.SetContactListener(&contacts);
         b2PolygonShape shape;
         shape.SetAsBox(0.5f, 0.5f);
         b2BodyDef fixed;
@@ -125,17 +200,67 @@ protected:
     void TearDown() override
     {
         world.SetContactListener(nullptr);
-        ContactManager::Get().ClearAll();
-        ContactManager::Get().TakePendingException();
+        contacts.ClearAll();
     }
+    ContactManager contacts;
     PhysicsInfo info{PhysicsTag::NONE, 0};
     b2World world{b2Vec2{0, 0}};
     b2Body* movingBody = nullptr;
 };
 
+TEST_F(ContactCleanup, IndependentWorldsDispatchTheSameEntityIdToTheirOwnListeners)
+{
+    ContactManager otherContacts;
+    b2World otherWorld({0, 0});
+    otherWorld.SetContactListener(&otherContacts);
+    ColliderFactory factory(world, contacts);
+    ColliderFactory otherFactory(otherWorld, otherContacts);
+    PhysicsInfo fixedInfo{PhysicsTag::NONE, info.id};
+    PhysicsInfo movingInfo{PhysicsTag::NONE, static_cast<EntityId>(info.id + 1)};
+    b2PolygonShape shape;
+    shape.SetAsBox(0.5f, 0.5f);
+    auto otherFixed = otherFactory.CreateStaticBody(&shape, {0, 0}, fixedInfo);
+    auto otherMoving = otherFactory.CreateDynamicBody(&shape, {0, 0}, movingInfo);
+    int firstCalls = 0, otherCalls = 0;
+    contacts.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++firstCalls; });
+    otherFixed.AddOnColliderEnter([&](b2Contact*) { ++otherCalls; });
+    otherWorld.Step(1.f / 60, 8, 3);
+    EXPECT_EQ(firstCalls, 0);
+    EXPECT_EQ(otherCalls, 1);
+    contacts.BeginContact(world.GetContactList());
+    EXPECT_EQ(firstCalls, 1);
+    EXPECT_EQ(otherCalls, 1);
+    contacts.ClearAll();
+    ASSERT_NE(otherWorld.GetContactList(), nullptr);
+    otherContacts.BeginContact(otherWorld.GetContactList());
+    EXPECT_EQ(otherCalls, 2);
+    EXPECT_EQ(otherContacts.GetSubscriptionCount(), 1);
+    EXPECT_THROW(factory.CreateStaticFixture(otherFixed.GetBody(), &shape, fixedInfo),
+                 std::invalid_argument);
+    otherFixed.ClearOnColliderEnter();
+    EXPECT_EQ(otherContacts.GetSubscriptionCount(), 0);
+    otherWorld.SetContactListener(nullptr);
+    otherWorld.DestroyBody(otherMoving.GetBody());
+    otherWorld.DestroyBody(otherFixed.GetBody());
+}
+
+TEST_F(ContactCleanup, PendingExceptionsAndClearAllAreLocalToEachManager)
+{
+    ContactManager other;
+    contacts.AddEvent(info.id, BEGIN,
+                      [](b2Contact*) { throw std::runtime_error("Local failure"); });
+    other.AddEvent(info.id, BEGIN, [](b2Contact*) {});
+    contacts.BeginContact(world.GetContactList());
+    EXPECT_FALSE(other.TakePendingException());
+    other.ClearAll();
+    EXPECT_THROW(contacts.RethrowPendingException(), std::runtime_error);
+    EXPECT_EQ(contacts.GetSubscriptionCount(), 1);
+    EXPECT_EQ(other.GetSubscriptionCount(), 0);
+}
+
 TEST_F(ContactCleanup, ClearedEntityCanRegisterAnotherCallback)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     int oldCalls = 0;
     int newCalls = 0;
     manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++oldCalls; });
@@ -151,7 +276,7 @@ TEST_F(ContactCleanup, ClearedEntityCanRegisterAnotherCallback)
 TEST_F(ContactCleanup, EndCallbackDoesNotRequireBeginCallback)
 {
     int endCalls = 0;
-    ContactManager::Get().AddEvent(info.id, END, [&](b2Contact*) { ++endCalls; });
+    contacts.AddEvent(info.id, END, [&](b2Contact*) { ++endCalls; });
     movingBody->SetTransform(b2Vec2{3, 0}, 0);
     world.Step(1.f / 60, 8, 3);
     EXPECT_EQ(endCalls, 1);
@@ -193,7 +318,7 @@ TEST_F(ContactCleanup, TagHelpersAcceptContactsWithoutAnyUserData)
 
 TEST_F(ContactCleanup, MultipleCallbacksRunInRegistrationOrder)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     std::vector<int> calls;
     manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { calls.push_back(1); });
     manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { calls.push_back(2); });
@@ -204,7 +329,7 @@ TEST_F(ContactCleanup, MultipleCallbacksRunInRegistrationOrder)
 
 TEST_F(ContactCleanup, RemovingOneCallbackPreservesOthersAndIsIdempotent)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     int removed = 0, remaining = 0;
     auto id = manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++removed; });
     manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++remaining; });
@@ -219,7 +344,7 @@ TEST_F(ContactCleanup, RemovingOneCallbackPreservesOthersAndIsIdempotent)
 
 TEST_F(ContactCleanup, SelfRemovalKeepsExecutingCallbackAlive)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     auto state = std::make_shared<int>(0);
     std::weak_ptr<int> lifetime = state;
     SubscriptionId id = 0;
@@ -237,7 +362,7 @@ TEST_F(ContactCleanup, SelfRemovalKeepsExecutingCallbackAlive)
 
 TEST_F(ContactCleanup, CallbackCanRemoveAnotherPendingCallback)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     SubscriptionId second = 0;
     int calls = 0;
     manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { manager.RemoveEvent(second); });
@@ -248,7 +373,7 @@ TEST_F(ContactCleanup, CallbackCanRemoveAnotherPendingCallback)
 
 TEST_F(ContactCleanup, AddedCallbackWaitsUntilNextDispatch)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     int calls = 0;
     bool added = false;
     manager.AddEvent(info.id, BEGIN, [&](b2Contact*)
@@ -267,7 +392,7 @@ TEST_F(ContactCleanup, AddedCallbackWaitsUntilNextDispatch)
 
 TEST_F(ContactCleanup, ClearingEntityDuringCallbackSkipsRemainingCallbacks)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     int beginCalls = 0, endCalls = 0;
     manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { manager.ClearEvent(info.id, BEGIN); });
     manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++beginCalls; });
@@ -280,7 +405,7 @@ TEST_F(ContactCleanup, ClearingEntityDuringCallbackSkipsRemainingCallbacks)
 
 TEST_F(ContactCleanup, ClearingAllDuringCallbackSkipsRemainingCallbacks)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     int calls = 0;
     manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { manager.ClearAll(); });
     manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++calls; });
@@ -292,7 +417,7 @@ TEST_F(ContactCleanup, ClearingAllDuringCallbackSkipsRemainingCallbacks)
 
 TEST_F(ContactCleanup, OldHandleAfterClearAllCannotRemoveNewSubscription)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     auto old = manager.AddEvent(info.id, BEGIN, [](b2Contact*) {});
     manager.ClearAll();
     int calls = 0;
@@ -305,7 +430,7 @@ TEST_F(ContactCleanup, OldHandleAfterClearAllCannotRemoveNewSubscription)
 
 TEST_F(ContactCleanup, ClearAndRegisterDuringCallbackDoesNotRunReplacementImmediately)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     int calls = 0;
     manager.AddEvent(info.id, BEGIN, [&](b2Contact*)
     {
@@ -320,7 +445,7 @@ TEST_F(ContactCleanup, ClearAndRegisterDuringCallbackDoesNotRunReplacementImmedi
 
 TEST_F(ContactCleanup, MutableCallbackStatePersistsBetweenDispatches)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     int observed = 0;
     manager.AddEvent(info.id, BEGIN, [&, count = 0](b2Contact*) mutable { observed = ++count; });
     manager.BeginContact(world.GetContactList());
@@ -330,7 +455,7 @@ TEST_F(ContactCleanup, MutableCallbackStatePersistsBetweenDispatches)
 
 TEST_F(ContactCleanup, InvalidCallbacksAndUnsupportedTypesAreRejected)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     EXPECT_THROW(manager.AddEvent(info.id, BEGIN, {}), std::invalid_argument);
     EXPECT_THROW(manager.AddEvent(info.id, WHILE_SENSOR_ONLY, [](b2Contact*) {}), std::invalid_argument);
     EXPECT_THROW(manager.AddEvent(info.id, static_cast<CollisionType>(99), [](b2Contact*) {}), std::invalid_argument);
@@ -339,7 +464,7 @@ TEST_F(ContactCleanup, InvalidCallbacksAndUnsupportedTypesAreRejected)
 
 TEST_F(ContactCleanup, NestedDispatchCanRemoveTheOuterPendingCallback)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     SubscriptionId second = 0;
     bool nested = false;
     int calls = 0;
@@ -359,7 +484,7 @@ TEST_F(ContactCleanup, NestedDispatchCanRemoveTheOuterPendingCallback)
 
 TEST_F(ContactCleanup, AddedCallbackForOtherFixtureWaitsUntilNextContactDispatch)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     auto* contact = world.GetContactList();
     ASSERT_NE(contact, nullptr);
     PhysicsInfo other{PhysicsTag::NONE, 1};
@@ -384,7 +509,7 @@ TEST_F(ContactCleanup, AddedCallbackForOtherFixtureWaitsUntilNextContactDispatch
 
 TEST_F(ContactCleanup, ExceptionAfterSelfRemovalDoesNotCorruptRegistry)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     SubscriptionId id = 0;
     int calls = 0;
     id = manager.AddEvent(info.id, BEGIN, [&](b2Contact*)
@@ -403,7 +528,7 @@ TEST_F(ContactCleanup, ExceptionAfterSelfRemovalDoesNotCorruptRegistry)
 
 TEST_F(ContactCleanup, BeginExceptionDuringRealStepLeavesWorldUnlocked)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     movingBody->SetTransform(b2Vec2{3, 0}, 0);
     world.Step(1.f / 60, 8, 3);
     int remainingCalls = 0;
@@ -423,7 +548,7 @@ TEST_F(ContactCleanup, BeginExceptionDuringRealStepLeavesWorldUnlocked)
 
 TEST_F(ContactCleanup, EndExceptionDuringRealStepLeavesWorldUnlocked)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     manager.AddEvent(info.id, END, [](b2Contact*) { throw std::runtime_error("End failure"); });
     movingBody->SetTransform(b2Vec2{3, 0}, 0);
     EXPECT_NO_THROW(world.Step(1.f / 60, 8, 3));
@@ -435,7 +560,7 @@ TEST_F(ContactCleanup, EndExceptionDuringRealStepLeavesWorldUnlocked)
 
 TEST_F(ContactCleanup, EndExceptionDuringBodyDestructionDoesNotInterruptCleanup)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     int remainingCalls = 0;
     manager.AddEvent(info.id, END, [](b2Contact*) { throw std::runtime_error("Destroy failure"); });
     manager.AddEvent(info.id, END, [&](b2Contact*) { ++remainingCalls; });
@@ -452,7 +577,7 @@ TEST_F(ContactCleanup, EndExceptionDuringBodyDestructionDoesNotInterruptCleanup)
 
 TEST_F(ContactCleanup, FirstExceptionIsPreservedUntilConsumedEvenAfterClearAll)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     manager.AddEvent(info.id, BEGIN, [](b2Contact*) { throw std::logic_error("First failure"); });
     manager.AddEvent(info.id, BEGIN, [](b2Contact*) { throw std::runtime_error("Second failure"); });
     EXPECT_NO_THROW(manager.BeginContact(world.GetContactList()));
@@ -463,7 +588,7 @@ TEST_F(ContactCleanup, FirstExceptionIsPreservedUntilConsumedEvenAfterClearAll)
 
 TEST_F(ContactCleanup, NonStandardExceptionIsDeferredAndCanBeConsumed)
 {
-    auto& manager = ContactManager::Get();
+    auto& manager = contacts;
     manager.AddEvent(info.id, END, [](b2Contact*) { throw 42; });
     EXPECT_NO_THROW(world.DestroyBody(movingBody));
     movingBody = nullptr;

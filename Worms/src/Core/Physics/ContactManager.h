@@ -27,11 +27,7 @@ class ContactManager : public b2ContactListener
 public:
     ContactManager(const ContactManager&) = delete;
     ContactManager(ContactManager&&) = delete;
-    static ContactManager& Get()
-    {
-        static ContactManager singleton{};
-        return singleton;
-    }
+    ContactManager() = default;
     // Internal Use Only
     void BeginContact(b2Contact* contact) noexcept override;
     void EndContact(b2Contact* contact) noexcept override;
@@ -51,7 +47,6 @@ public:
     void RethrowPendingException();
 
 private:
-    ContactManager() = default;
     EventMap& GetEvents(const CollisionType type);
     CollisionEvent Pending(b2Fixture* fixture, CollisionType type);
     void Dispatch(const CollisionEvent& pending, b2Contact* contact);

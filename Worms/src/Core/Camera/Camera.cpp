@@ -2,6 +2,7 @@
 #include "Core/Input.h"
 #include "Core/Time.h"
 #include "ExceptionHandling/SDL_Exception.h"
+#include <utility>
 
 double smoothstep(double x, double endPoint, double currentPoint)
 {
@@ -33,6 +34,7 @@ void Camera::Initialise(const SceneContext& context)
         focusPoint = std::make_unique<FocusPoint>();
         focusPoint->Initialise(context);
         timer.Reset();
+        targetLostPending = targetLossReported = false;
     }
     catch (...)
     {
@@ -57,13 +59,20 @@ void Camera::Update()
     auto targetPosition = focusPoint->GetPos();
     if (targetPosition.has_value())
     {
+        targetLostPending = targetLossReported = false;
         ChangePos(adjustPos(*targetPosition, GetPosition()));
         timer.Reset();
     }
-    else if (timer.Measure() > 1.5 && noTargetEvent)
+    else if (timer.Measure() > 1.5 && !targetLossReported)
     {
-        noTargetEvent();
+        targetLostPending = true;
+        targetLossReported = true;
     }
+}
+
+bool Camera::ConsumeTargetLost() noexcept
+{
+    return std::exchange(targetLostPending, false);
 }
 
 Position& Camera::GetPosition() const
@@ -77,7 +86,7 @@ Position& Camera::GetPosition() const
 
 void Camera::CleanUp()
 {
-    noTargetEvent = nullptr;
+    targetLostPending = targetLossReported = false;
     if (focusPoint)
     {
         focusPoint->CleanUp();

@@ -37,7 +37,8 @@ public:
 private:
     EntityId id;
     b2Body* body;
+    ContactManager& contacts;
 
     friend ColliderFactory;
-    Collider(b2Body*, PhysicsInfo);
+    Collider(b2Body*, PhysicsInfo, ContactManager&);
 };

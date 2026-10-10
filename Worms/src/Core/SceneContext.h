@@ -5,6 +5,8 @@ struct SDL_Renderer;
 class World;
 class b2World;
 class GameObject;
+class ColliderFactory;
+class ContactManager;
 
 // Commands borrow their recipient; ownership transfers only through QueueAdd.
 class ObjectCommands
@@ -23,4 +25,6 @@ struct SceneContext
     World& world;
     b2World& physics;
     ObjectCommands& objects;
+    ColliderFactory& colliders;
+    ContactManager& contacts;
 };

@@ -57,6 +57,9 @@ private:
     std::deque<GameObject*> pendingRemovals;
     std::unique_ptr<World> world;
     std::unique_ptr<b2World> physicsWorld;
+    std::unique_ptr<ContactManager> contacts;
+    std::unique_ptr<ColliderFactory> colliders;
+    Camera* camera = nullptr;
     std::unique_ptr<SceneContext> context;
     std::unique_ptr<b2ColliderDraw> b2DebugDraw;
     std::unique_ptr<WormManager> wormManager;

@@ -58,26 +58,30 @@ void WormManager::Initialise()
 {
     if (initialized)
         throw std::logic_error("WormManager is already initialized");
-    camera.noTargetEvent = [&]()
-    {
-        if (teams.empty())
-        {
-            return;
-        }
-
-        if (!nextTeamAlreadySelected)
-        {
-            ChangeTeam();
-        }
-
-        nextTeamAlreadySelected = false;
-
-        const EntityId wormId = GetActiveWormId();
-        weapon.SetParent(wormId);
-        camera.ChangeTarget(wormId);
-        weapon.Activate();
-    };
     initialized = true;
+}
+
+void WormManager::OnCameraTargetLost()
+{
+    if (!initialized)
+        return;
+
+    if (teams.empty())
+    {
+        return;
+    }
+
+    if (!nextTeamAlreadySelected)
+    {
+        ChangeTeam();
+    }
+
+    nextTeamAlreadySelected = false;
+
+    const EntityId wormId = GetActiveWormId();
+    weapon.SetParent(wormId);
+    camera.ChangeTarget(wormId);
+    weapon.Activate();
 }
 
 void WormManager::CreateTeam(int size)
@@ -242,7 +246,6 @@ void WormManager::CleanUp()
     if (!initialized)
         return;
     nextTeamAlreadySelected = false;
-    camera.noTargetEvent = nullptr;
     camera.ClearTarget();
     weapon.ClearParent();
 

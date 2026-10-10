@@ -91,8 +91,6 @@ void GameScene::Initialize()
 {
     if (ownsRuntime)
         throw std::logic_error("Scene is already initialized");
-    if (ColliderFactory::Get().HasPhysicsWorld())
-        throw std::logic_error("Only one scene can use the global physics services");
 
     ownsRuntime = true;
     try
@@ -105,14 +103,17 @@ void GameScene::Initialize()
         world->RegisterSystem<TargetSystem>(*world);
         world->RegisterSystem<ParticleUpdater>();
         physicsWorld = std::make_unique<b2World>(b2Vec2(0, -9.811f));
-        context = std::make_unique<SceneContext>(renderer, *world, *physicsWorld, *this);
+        contacts = std::make_unique<ContactManager>();
+        colliders = std::make_unique<ColliderFactory>(*physicsWorld, *contacts);
+        context = std::make_unique<SceneContext>(renderer, *world, *physicsWorld, *this, *colliders,
+                                                 *contacts);
         auto camera = std::make_unique<Camera>();
         auto cameraPtr = camera.get();
+        this->camera = cameraPtr;
         QueueAdd(std::move(camera));
         world->RegisterSystem<SpriteRenderer>(renderer, *cameraPtr);
 
         setUpDebugDraw(*cameraPtr);
-        ColliderFactory::Get().Init(physicsWorld.get());
         auto weapon = std::make_unique<Weapon>(*cameraPtr);
         auto* weaponPtr = weapon.get();
         QueueAdd(std::move(weapon));
@@ -150,7 +151,7 @@ void GameScene::setUpDebugDraw(Camera& camera)
 {
     b2DebugDraw = std::make_unique<b2ColliderDraw>(renderer, camera);
     physicsWorld->SetDebugDraw(b2DebugDraw.get());
-    physicsWorld->SetContactListener(&ContactManager::Get());
+    physicsWorld->SetContactListener(contacts.get());
 }
 
 void GameScene::registerComponents()
@@ -182,7 +183,9 @@ void GameScene::ValidateObject(const GameObject& object) const
     if (object.HasEntity() && object.world != world.get())
         throw std::invalid_argument("Object belongs to another ECS world");
     if (object.context &&
-        (&object.context->physics != physicsWorld.get() || object.context->renderer != renderer))
+        (&object.context->physics != physicsWorld.get() || object.context->renderer != renderer ||
+         &object.context->colliders != colliders.get() ||
+         &object.context->contacts != contacts.get()))
         throw std::invalid_argument("Object uses different scene services");
 }
 
@@ -313,12 +316,12 @@ void GameScene::Update()
     if (processingFrame)
         throw std::logic_error("Scene update is already in progress");
     ScopedFrame frame(processingFrame);
-    ContactManager::Get().Update();
+    contacts->Update();
 
     world->Update();
-    ContactManager::Get().RethrowPendingException();
+    contacts->RethrowPendingException();
     physicsWorld->Step(static_cast<float>(Time::deltaTime), 8, 3);
-    ContactManager::Get().RethrowPendingException();
+    contacts->RethrowPendingException();
     wormManager->Update();
     weaponManager->Update();
 
@@ -326,8 +329,12 @@ void GameScene::Update()
     ProcessPendingRemovals();
 
     for (auto& gameObject : activeObjects)
+    {
         gameObject->Update();
-    ContactManager::Get().RethrowPendingException();
+        if (gameObject.get() == camera && camera->ConsumeTargetLost())
+            wormManager->OnCameraTargetLost();
+    }
+    contacts->RethrowPendingException();
 }
 
 void GameScene::Render()
@@ -395,11 +402,15 @@ void GameScene::CleanUp() noexcept
         }
     }
 
-    ReportCleanupError("Collision callback failed during cleanup",
-                       ContactManager::Get().TakePendingException());
-    ContactManager::Get().ClearAll();
+    if (contacts)
+    {
+        ReportCleanupError("Collision callback failed during cleanup",
+                           contacts->TakePendingException());
+        contacts->ClearAll();
+    }
 
     wormManager.reset();
+    camera = nullptr;
     pendingRemovals.clear();
     pendingAdds.clear();
     activeObjects.clear();
@@ -408,9 +419,10 @@ void GameScene::CleanUp() noexcept
     music.reset();
     b2DebugDraw.reset();
     failedStartupObject.reset();
-    ColliderFactory::Get().Init(nullptr);
     context.reset();
+    colliders.reset();
     physicsWorld.reset();
+    contacts.reset();
     world.reset();
 
     ownsRuntime = false;

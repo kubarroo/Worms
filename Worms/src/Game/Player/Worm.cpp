@@ -16,7 +16,7 @@ Worm::Worm(const Camera& camera, SDL_Texture* healthTexture, Position spawnPosit
 
 void Worm::Initialise(const SceneContext& context)
 {
-    ColliderFactory::Get().RequirePhysicsWorld(context.physics);
+    context.colliders.RequireServices(context.physics, context.contacts);
     GameObject::Initialise(context);
     try
     {
@@ -26,14 +26,14 @@ void Worm::Initialise(const SceneContext& context)
         physicsInfo.tag = PhysicsTag::WORM;
         physicsInfo.id = objectId;
 
-        damageSubscription = ContactManager::Get().AddEvent(objectId, CollisionType::BEGIN,
-                                       [&](b2Contact* contact)
-                                       {
-                                           auto entId = GetEntityWithTag(
-                                               contact, PhysicsTag::DESTRUCTION_FIELD);
-                                           if (entId.has_value())
-                                               healthBar->TakeDamage(40);
-                                       });
+        damageSubscription = Context().contacts.AddEvent(
+            objectId, CollisionType::BEGIN,
+            [&](b2Contact* contact)
+            {
+                auto entId = GetEntityWithTag(contact, PhysicsTag::DESTRUCTION_FIELD);
+                if (entId.has_value())
+                    healthBar->TakeDamage(40);
+            });
 
         groundedId = world->CreateEntity();
         hasGroundedEntity = true;
@@ -51,7 +51,8 @@ void Worm::Initialise(const SceneContext& context)
         b2PolygonShape groundShape;
         groundShape.SetAsBox(0.075, 0.07, {0.f, -0.08f}, 0.f);
 
-        auto createdCollider = ColliderFactory::Get().CreateDynamicBody(&shape, {pos.x, pos.y}, physicsInfo);
+        auto createdCollider =
+            Context().colliders.CreateDynamicBody(&shape, {pos.x, pos.y}, physicsInfo);
         try { collider = std::make_unique<Collider>(std::move(createdCollider)); }
         catch (...)
         {
@@ -59,12 +60,12 @@ void Worm::Initialise(const SceneContext& context)
             throw;
         }
         collider->FreezeRotation();
-        ColliderFactory::Get().CreateTriggerFixture(collider->GetBody(), &groundShape,
-                                                    groundedPhysicsInfo);
-        groundedBeginSubscription = ContactManager::Get().AddEvent(groundedId, CollisionType::BEGIN,
-                                       [&](b2Contact*) { grounded = true; });
-        groundedEndSubscription = ContactManager::Get().AddEvent(groundedId, CollisionType::END,
-                                       [&](b2Contact*) { grounded = false; });
+        Context().colliders.CreateTriggerFixture(collider->GetBody(), &groundShape,
+                                                 groundedPhysicsInfo);
+        groundedBeginSubscription = Context().contacts.AddEvent(
+            groundedId, CollisionType::BEGIN, [&](b2Contact*) { grounded = true; });
+        groundedEndSubscription = Context().contacts.AddEvent(
+            groundedId, CollisionType::END, [&](b2Contact*) { grounded = false; });
 
         healthBar = std::make_unique<HealthBar>(objectId, camera, 100, healthTexture);
         healthBar->Initialise(context);
@@ -132,9 +133,9 @@ void Worm::CleanUp()
     {
         return;
     }
-    ContactManager::Get().RemoveEvent(damageSubscription);
-    ContactManager::Get().RemoveEvent(groundedBeginSubscription);
-    ContactManager::Get().RemoveEvent(groundedEndSubscription);
+    Context().contacts.RemoveEvent(damageSubscription);
+    Context().contacts.RemoveEvent(groundedBeginSubscription);
+    Context().contacts.RemoveEvent(groundedEndSubscription);
     damageSubscription = groundedBeginSubscription = groundedEndSubscription = 0;
     if (collider)
     {

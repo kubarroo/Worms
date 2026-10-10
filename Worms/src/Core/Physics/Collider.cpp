@@ -4,37 +4,32 @@
 
 SubscriptionId Collider::AddOnColliderEnter(CollisionCallback callback) const
 {
-    return ContactManager::Get().AddEvent(id, CollisionType::BEGIN, std::move(callback));
+    return contacts.AddEvent(id, CollisionType::BEGIN, std::move(callback));
 }
 
 SubscriptionId Collider::AddOnColliderExit(CollisionCallback callback) const
 {
-    return ContactManager::Get().AddEvent(id, CollisionType::END, std::move(callback));
+    return contacts.AddEvent(id, CollisionType::END, std::move(callback));
 }
 
 bool Collider::RemoveOnColliderEnter(SubscriptionId subscription) const
 {
-    return ContactManager::Get().RemoveEvent(subscription);
+    return contacts.RemoveEvent(subscription);
 }
 
 bool Collider::RemoveOnColliderExit(SubscriptionId subscription) const
 {
-    return ContactManager::Get().RemoveEvent(subscription);
+    return contacts.RemoveEvent(subscription);
 }
 
 void Collider::ClearOnColliderEnter() const
 {
-    ContactManager::Get().ClearEvent(id, CollisionType::BEGIN);
+    contacts.ClearEvent(id, CollisionType::BEGIN);
 }
-
-// void Collider::ClearOnCollider() const
-//{
-//	ContactManager::Get().ClearEvent( id, CollisionType::WHILE );
-// }
 
 void Collider::ClearOnColliderExit() const
 {
-    ContactManager::Get().ClearEvent(id, CollisionType::END);
+    contacts.ClearEvent(id, CollisionType::END);
 }
 
 void Collider::FreezeRotation()
@@ -62,8 +57,7 @@ b2Body* Collider::GetBody()
     return body;
 }
 
-Collider::Collider(b2Body* body, PhysicsInfo info)
+Collider::Collider(b2Body* body, PhysicsInfo info, ContactManager& contacts)
+    : id(info.id), body(body), contacts(contacts)
 {
-    this->body = body;
-    id = info.id;
 }

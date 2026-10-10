@@ -32,14 +32,15 @@ void Projectile::Update()
 		sensorInfo.tag = PhysicsTag::DESTRUCTION_FIELD;
 		b2CircleShape shape;
 		shape.m_radius = params.explosionRadius;
-		fixture = ColliderFactory::Get().CreateTriggerFixture( collider->GetBody(), &shape, sensorInfo );
+        fixture = Context().colliders.CreateTriggerFixture(collider->GetBody(), &shape, sensorInfo);
         Context().objects.RequestDestroy(*this);
     }
 }
 
 void Projectile::CleanUp()
 {
-    ContactManager::Get().RemoveEvent(collisionSubscription);
+    if (collisionSubscription)
+        Context().contacts.RemoveEvent(collisionSubscription);
     collisionSubscription = 0;
 	if ( collider )
 	{
@@ -56,7 +57,7 @@ void Projectile::CleanUp()
 
 void Projectile::onCollision( b2Contact* constact )
 {
-    ContactManager::Get().RemoveEvent(collisionSubscription);
+    Context().contacts.RemoveEvent(collisionSubscription);
     collisionSubscription = 0;
 	if ( collisionSound ) collisionSound->Play();
 	if ( params.explosionOffset == 0 )
@@ -66,7 +67,7 @@ void Projectile::onCollision( b2Contact* constact )
 
 void Projectile::Initialise(const SceneContext& context)
 {
-    ColliderFactory::Get().RequirePhysicsWorld(context.physics);
+    context.colliders.RequireServices(context.physics, context.contacts);
     GameObject::Initialise(context);
     try
     {
@@ -80,7 +81,7 @@ void Projectile::Initialise(const SceneContext& context)
 
         b2CircleShape shape;
         shape.m_radius = 0.1f;
-        auto createdCollider = ColliderFactory::Get().CreateDynamicBody(
+        auto createdCollider = Context().colliders.CreateDynamicBody(
             &shape, {startPosX, startPosY}, physicsInfo, reinterpret_cast<uintptr_t>(&params));
         try { collider = std::make_unique<Collider>(std::move(createdCollider)); }
         catch (...)
@@ -93,7 +94,7 @@ void Projectile::Initialise(const SceneContext& context)
         rigidBody.body = collider->GetBody();
         rigidBody.body->GetFixtureList()->SetRestitution(params.bounciness);
         rigidBody.body->SetGravityScale(params.gravityScale);
-        collisionSubscription = ContactManager::Get().AddEvent(
+        collisionSubscription = Context().contacts.AddEvent(
             objectId, CollisionType::BEGIN,
             std::bind(&Projectile::onCollision, this, std::placeholders::_1));
         if (camera) camera->ChangeTarget(objectId);

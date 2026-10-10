@@ -9,6 +9,7 @@ class WormManager
 public:
     WormManager(const SceneContext& context, Camera& camera, Weapon& weapon);
     void Initialise();
+    void OnCameraTargetLost();
     WormManager(const WormManager&) = delete;
     WormManager(WormManager&&) = delete;
 

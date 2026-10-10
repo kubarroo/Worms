@@ -14,7 +14,7 @@
 
 void Map::Initialise(const SceneContext& context)
 {
-    ColliderFactory::Get().RequirePhysicsWorld(context.physics);
+    context.colliders.RequireServices(context.physics, context.contacts);
     GameObject::Initialise(context);
     physicsWorld = &context.physics;
     try
@@ -24,8 +24,9 @@ void Map::Initialise(const SceneContext& context)
         world->AddComponent<Position>(objectId, {1.5f, -2.f});
         physTex = IMG_LoadPhysicTexture(renderer, "map.png");
         SDL_CHECK((physTex ? physTex->surface.get() : nullptr));
-        destructionSubscription = ContactManager::Get().AddEvent(objectId, CollisionType::BEGIN,
-                                       std::bind(&Map::DestroyMap, this, std::placeholders::_1));
+        destructionSubscription =
+            Context().contacts.AddEvent(objectId, CollisionType::BEGIN,
+                                        std::bind(&Map::DestroyMap, this, std::placeholders::_1));
         world->AddComponent<RigidBody>(objectId);
         mapTexture.reset(SDL_CreateTextureFromSurface(renderer, physTex->surface.get()));
         SDL_CHECK(mapTexture.get());
@@ -62,7 +63,7 @@ void Map::CleanUp()
     {
         return;
     }
-    ContactManager::Get().RemoveEvent(destructionSubscription);
+    Context().contacts.RemoveEvent(destructionSubscription);
     destructionSubscription = 0;
     if (mapBody)
     {
@@ -149,7 +150,7 @@ void Map::CreateNewColliders()
         b2ChainShape shape;
         shape.CreateLoop(physPoints.front().data(), static_cast<int32>(physPoints.front().size()));
         const auto& pos = world->GetComponent<Position>(objectId);
-        auto collider = ColliderFactory::Get().CreateStaticBody(&shape, {pos.x, pos.y}, physicsInfo);
+        auto collider = Context().colliders.CreateStaticBody(&shape, {pos.x, pos.y}, physicsInfo);
         replacement = collider.GetBody();
         try
         {
@@ -178,7 +179,7 @@ void Map::GenerateFixturesForAllContours(Collider& collider,
     for (std::size_t i = 1; i < contours.size(); i++)
     {
         shape.CreateLoop(contours[i].data(), static_cast<int32>(contours[i].size()));
-        ColliderFactory::Get().CreateStaticFixture(collider.GetBody(), &shape, physicsInfo);
+        Context().colliders.CreateStaticFixture(collider.GetBody(), &shape, physicsInfo);
         shape.Clear();
     }
 }
