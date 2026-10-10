@@ -15,8 +15,8 @@ class Worm : public GameObject
 {
 public:
     using TexturePtr = Sdl::TexturePtr;
-    Worm(SDL_Renderer* newRenderer, World* newWorld, b2World* physicsWorld, const Camera& camera,
-         SDL_Texture* texture, GameScene* scene = nullptr);
+    Worm(const Camera& camera, SDL_Texture* healthTexture, Position spawnPosition);
+    void Initialise(const SceneContext& context) override;
     void Update(std::vector<Worm*>& wormsToDelete);
     void Jump();
     void CleanUp() override;
@@ -30,7 +30,10 @@ private:
     SubscriptionId damageSubscription = 0;
     SubscriptionId groundedBeginSubscription = 0;
     SubscriptionId groundedEndSubscription = 0;
-    Sound jumpSound{"jump.wav"};
+    const Camera& camera;
+    SDL_Texture* healthTexture;
+    Position spawnPosition;
+    std::unique_ptr<Sound> jumpSound;
     std::unique_ptr<HealthBar> healthBar;
     std::unique_ptr<Collider> collider = NULL;
     TexturePtr spriteTexture;

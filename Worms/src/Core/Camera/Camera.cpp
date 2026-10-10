@@ -24,13 +24,14 @@ Position adjustPos(const Position& focusPos, const Position& currentPos)
     return newPos;
 }
 
-void Camera::Initialise(SDL_Renderer* newRenderer, World* newWorld)
+void Camera::Initialise(const SceneContext& context)
 {
-    GameObject::Initialise(newRenderer, newWorld);
+    GameObject::Initialise(context);
     try
     {
         world->AddComponent<Position>(objectId, {2, -1});
-        focusPoint = std::make_unique<FocusPoint>(newRenderer, newWorld);
+        focusPoint = std::make_unique<FocusPoint>();
+        focusPoint->Initialise(context);
         timer.Reset();
     }
     catch (...)

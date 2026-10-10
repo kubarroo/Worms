@@ -1,27 +1,24 @@
 #include "Core/GameObject.h"
-#include "Game/GameScene.h"
 
-GameScene& GameObject::Scene() const
+const SceneContext& GameObject::Context() const
 {
-    if (!scene) throw std::logic_error("GameObject has no scene");
-    return *scene;
+    if (!context)
+        throw std::logic_error("GameObject is not initialized");
+    return *context;
 }
 
-void GameObject::Initialise(SDL_Renderer* newRenderer, World* newWorld)
+void GameObject::Initialise(const SceneContext& newContext)
 {
-    if (!newWorld)
-    {
-        throw std::invalid_argument("GameObject requires a world");
-    }
     if (hasEntity)
     {
         throw std::logic_error("GameObject already has an entity");
     }
-    renderer = newRenderer;
-    world = newWorld;
-    objectId = world->CreateEntity();
+    const auto newId = newContext.world.CreateEntity();
+    context.emplace(newContext);
+    renderer = newContext.renderer;
+    world = &newContext.world;
+    objectId = newId;
     hasEntity = true;
-    // Terminal::Get().Log(objectId + "", );
 }
 
 void GameObject::CleanUp()
@@ -35,4 +32,5 @@ void GameObject::CleanUp()
     objectId = {};
     world = nullptr;
     renderer = nullptr;
+    context.reset();
 }

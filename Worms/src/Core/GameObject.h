@@ -1,22 +1,21 @@
 #pragma once
+#include "Core/SceneContext.h"
 #include "ECS/ECS_Types.h"
 #include "ECS/World.h"
 #include "SDL2/SDL.h"
+#include <optional>
 #include <stdexcept>
-#include <vector>
-
-class GameScene;
 
 class GameObject
 {
 public:
-    explicit GameObject(GameScene* scene = nullptr) : scene(scene) {}
+    GameObject() = default;
     GameObject(const GameObject&) = delete;
     GameObject& operator=(const GameObject&) = delete;
     GameObject(GameObject&&) = delete;
     GameObject& operator=(GameObject&&) = delete;
 
-    virtual void Initialise(SDL_Renderer* newRenderer, World* newWorld);
+    virtual void Initialise(const SceneContext& context);
     virtual void Update() {};
     virtual void Render() {};
     virtual void CleanUp();
@@ -38,7 +37,7 @@ public:
     virtual ~GameObject() = default;
 
 protected:
-    GameScene& Scene() const;
+    const SceneContext& Context() const;
     EntityId objectId{};
     bool hasEntity = false;
     World* world = nullptr;
@@ -46,5 +45,5 @@ protected:
 
 private:
     friend class GameScene;
-    GameScene* scene = nullptr;
+    std::optional<SceneContext> context;
 };

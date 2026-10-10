@@ -20,7 +20,7 @@ public:
         return zoom;
     };
 
-    void Initialise(SDL_Renderer* newRenderer, World* newWorld) override;
+    void Initialise(const SceneContext& context) override;
     void Update() override;
     void CleanUp() override;
     void ChangePos(Position newPos)

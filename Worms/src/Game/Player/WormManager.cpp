@@ -49,11 +49,15 @@ SDL_Texture* createTexture(int team, SDL_Renderer* renderer)
     return texture;
 };
 
-WormManager::WormManager(SDL_Renderer* renderer, World* world, b2World* physicsWorld,
-                         Camera& camera, Weapon& weapon, GameScene* scene)
-    : renderer(renderer), world(world), teams(), physicsWorld(physicsWorld), camera(camera),
-      weapon(weapon), scene(scene)
+WormManager::WormManager(const SceneContext& context, Camera& camera, Weapon& weapon)
+    : context(context), camera(camera), weapon(weapon)
 {
+}
+
+void WormManager::Initialise()
+{
+    if (initialized)
+        throw std::logic_error("WormManager is already initialized");
     camera.noTargetEvent = [&]()
     {
         if (teams.empty())
@@ -73,16 +77,19 @@ WormManager::WormManager(SDL_Renderer* renderer, World* world, b2World* physicsW
         camera.ChangeTarget(wormId);
         weapon.Activate();
     };
+    initialized = true;
 }
 
 void WormManager::CreateTeam(int size)
 {
+    if (!initialized)
+        throw std::logic_error("WormManager is not initialized");
     if (size <= 0)
     {
         throw std::invalid_argument("Team must contain at least one worm");
     }
 
-    WormTeam::TexturePtr texture(createTexture(static_cast<int>(teams.size()), renderer));
+    WormTeam::TexturePtr texture(createTexture(static_cast<int>(teams.size()), context.renderer));
 
     SDL_CHECK(texture.get());
 
@@ -90,13 +97,19 @@ void WormManager::CreateTeam(int size)
 
     try
     {
+        newTeam->Initialise();
         for (int i = 0; i < size; ++i)
         {
-            newTeam->AddWorm(std::make_unique<Worm>(renderer, world, physicsWorld, camera,
-                                                    newTeam->GetHealthBarTexture(), scene));
+            const Position spawnPosition{
+                -1.f + static_cast<float>(spawnedWorms) + static_cast<float>(i), 2.f};
+            auto worm =
+                std::make_unique<Worm>(camera, newTeam->GetHealthBarTexture(), spawnPosition);
+            worm->Initialise(context);
+            newTeam->AddWorm(std::move(worm));
         }
 
         teams.push_back(std::move(newTeam));
+        spawnedWorms += static_cast<std::size_t>(size);
     }
     catch (...)
     {
@@ -178,6 +191,8 @@ void WormManager::ChangeActiveWorm()
 
 void WormManager::Update()
 {
+    if (!initialized)
+        return;
     if (!nextTeamAlreadySelected)
     {
         if (Input::Get().ChangeWorm())
@@ -224,6 +239,8 @@ void WormManager::RenderHealthBars()
 
 void WormManager::CleanUp()
 {
+    if (!initialized)
+        return;
     nextTeamAlreadySelected = false;
     camera.noTargetEvent = nullptr;
     camera.ClearTarget();
@@ -236,6 +253,8 @@ void WormManager::CleanUp()
 
     teams.clear();
     activeTeam = 0;
+    spawnedWorms = 0;
+    initialized = false;
 }
 
 void WormManager::ActiveTeamCheck()

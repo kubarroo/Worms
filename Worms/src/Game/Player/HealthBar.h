@@ -6,8 +6,8 @@
 class HealthBar : public GameObject
 {
 public:
-    HealthBar(SDL_Renderer* renderer, World* world, EntityId newParentId, const Camera& camera,
-              int health, SDL_Texture* texture);
+    HealthBar(EntityId parentId, const Camera& camera, int health, SDL_Texture* texture);
+    void Initialise(const SceneContext& context) override;
     void Render() override;
     void CleanUp() override;
     void TakeDamage(int amount);
@@ -18,6 +18,9 @@ public:
     }
 
 private:
+    EntityId parentId;
+    int initialHealth;
+    SDL_Texture* texture;
     SDL_Texture* healthBar = nullptr;
     const Camera& camera;
 };

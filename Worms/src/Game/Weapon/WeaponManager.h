@@ -12,9 +12,9 @@
 class WeaponManager
 {
 public:
-    WeaponManager(SDL_Renderer* renderer, Camera& camera, GameScene& scene);
+    WeaponManager(SDL_Renderer& renderer, Weapon& weapon);
 
-	void Initialise();
+    void Initialise();
 	void Update();
 	Weapon* GetWeapon() const { return weapon; }
 	~WeaponManager() = default;

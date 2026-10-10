@@ -7,8 +7,8 @@
 class WormManager
 {
 public:
-    WormManager(SDL_Renderer* renderer, World* world, b2World* physicsWorld, Camera& camera,
-                Weapon& weapon, GameScene* scene = nullptr);
+    WormManager(const SceneContext& context, Camera& camera, Weapon& weapon);
+    void Initialise();
     WormManager(const WormManager&) = delete;
     WormManager(WormManager&&) = delete;
 
@@ -38,11 +38,10 @@ private:
     std::vector<std::unique_ptr<WormTeam>> teams;
     int activeTeam = 0;
     bool nextTeamAlreadySelected = false;
+    std::size_t spawnedWorms = 0;
 
-    SDL_Renderer* renderer;
-    World* world;
-    b2World* physicsWorld;
+    SceneContext context;
+    bool initialized = false;
     Camera& camera;
     Weapon& weapon;
-    GameScene* scene;
 };

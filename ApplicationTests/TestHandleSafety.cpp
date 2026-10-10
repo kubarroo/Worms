@@ -1,6 +1,7 @@
 #include "Core/Camera/Camera.h"
 #include "Core/GameObject.h"
 #include "Game/Systems.h"
+#include <box2d/b2_world.h>
 #include <gtest/gtest.h>
 #include <memory>
 #include <type_traits>
@@ -15,6 +16,19 @@ static_assert(!std::is_reference_v<decltype(std::declval<Camera&>().Y())>);
 
 namespace
 {
+class HeadlessCommands : public ObjectCommands
+{
+public:
+    void QueueAdd(std::unique_ptr<GameObject>) override
+    {
+        throw std::logic_error("Headless test has no object queue");
+    }
+    void RequestDestroy(GameObject&) override
+    {
+        throw std::logic_error("Headless test has no object queue");
+    }
+};
+
 class ScopedSdlTimer
 {
 public:
@@ -31,18 +45,20 @@ private:
 TEST(HandleSafety, EntityZeroIsValidAndCleanupCanBeRepeated)
 {
     auto world = std::make_unique<World>(nullptr);
+    b2World physics({0, 0});
+    HeadlessCommands commands;
+    const SceneContext context{nullptr, *world, physics, commands};
     world->RegisterComponent<Position>();
     GameObject object;
     EXPECT_FALSE(object.HasEntity());
     EXPECT_THROW(object.GetId(), std::logic_error);
     EXPECT_NO_THROW(object.CleanUp());
-    EXPECT_THROW(object.Initialise(nullptr, nullptr), std::invalid_argument);
 
-    object.Initialise(nullptr, world.get());
+    object.Initialise(context);
     EXPECT_TRUE(object.HasEntity());
     EXPECT_EQ(object.GetId(), 0);
     world->AddComponent<Position>(object.GetId(), {1, 2});
-    EXPECT_THROW(object.Initialise(nullptr, world.get()), std::logic_error);
+    EXPECT_THROW(object.Initialise(context), std::logic_error);
 
     object.CleanUp();
     EXPECT_FALSE(object.HasEntity());
@@ -53,10 +69,14 @@ TEST(HandleSafety, EntityZeroIsValidAndCleanupCanBeRepeated)
 TEST(HandleSafety, FocusPointCanHaveNoTargetOrTargetEntityZero)
 {
     auto world = std::make_unique<World>(nullptr);
+    b2World physics({0, 0});
+    HeadlessCommands commands;
+    const SceneContext context{nullptr, *world, physics, commands};
     world->RegisterComponent<Position>();
     const auto target = world->CreateEntity();
     world->AddComponent<Position>(target, {3, 4});
-    FocusPoint focus(nullptr, world.get());
+    FocusPoint focus;
+    focus.Initialise(context);
     EXPECT_FALSE(focus.GetPos());
     focus.ChangeTarget(target);
     ASSERT_TRUE(focus.GetPos());
@@ -75,13 +95,16 @@ TEST(HandleSafety, CameraReadsItsPositionAfterComponentCompaction)
     ScopedSdlTimer timer;
     ASSERT_EQ(timer.Result(), 0) << SDL_GetError();
     auto world = std::make_unique<World>(nullptr);
+    b2World physics({0, 0});
+    HeadlessCommands commands;
+    const SceneContext context{nullptr, *world, physics, commands};
     world->RegisterComponent<Position>();
     const auto other = world->CreateEntity();
     world->AddComponent<Position>(other, {9, 9});
     Camera camera;
     EXPECT_THROW(camera.X(), std::logic_error);
     EXPECT_NO_THROW(camera.Update());
-    camera.Initialise(nullptr, world.get());
+    camera.Initialise(context);
     world->DestroyEntity(other);
     EXPECT_FLOAT_EQ(camera.X(), 2);
     EXPECT_FLOAT_EQ(camera.Y(), -1);
@@ -155,6 +178,9 @@ TEST(HandleSafety, HandlesRejectReusedSlotsAndForeignWorlds)
 TEST(HandleSafety, ObserversClearMissingPositionAndDoNotResumeAfterItIsAddedBack)
 {
     auto world = std::make_unique<World>(nullptr);
+    b2World physics({0, 0});
+    HeadlessCommands commands;
+    const SceneContext context{nullptr, *world, physics, commands};
     world->RegisterComponent<Position>();
     world->RegisterComponent<Follow>();
     world->RegisterSystem<TargetSystem>(*world);
@@ -163,7 +189,8 @@ TEST(HandleSafety, ObserversClearMissingPositionAndDoNotResumeAfterItIsAddedBack
     const auto follower = world->CreateEntity();
     world->AddComponent<Position>(follower, {5, 6});
     world->AddComponent<Follow>(follower, {world->GetHandle(target), 0, 0});
-    FocusPoint focus(nullptr, world.get());
+    FocusPoint focus;
+    focus.Initialise(context);
     focus.ChangeTarget(target);
     const auto snapshot = focus.GetPos();
     ASSERT_TRUE(snapshot);
@@ -183,12 +210,16 @@ TEST(HandleSafety, ObserversClearMissingPositionAndDoNotResumeAfterItIsAddedBack
 TEST(HandleSafety, FocusPointResolvesPositionAfterAnotherComponentIsCompacted)
 {
     auto world = std::make_unique<World>(nullptr);
+    b2World physics({0, 0});
+    HeadlessCommands commands;
+    const SceneContext context{nullptr, *world, physics, commands};
     world->RegisterComponent<Position>();
     const auto other = world->CreateEntity();
     world->AddComponent<Position>(other, {9, 10});
     const auto target = world->CreateEntity();
     world->AddComponent<Position>(target, {1, 2});
-    FocusPoint focus(nullptr, world.get());
+    FocusPoint focus;
+    focus.Initialise(context);
     focus.ChangeTarget(target);
     world->DestroyEntity(other);
     ASSERT_TRUE(focus.GetPos());

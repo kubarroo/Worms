@@ -2,10 +2,22 @@
 #include <algorithm>
 #include <stdexcept>
 
+void WormTeam::Initialise()
+{
+    if (initialized)
+        throw std::logic_error("WormTeam is already initialized");
+    dieSound = std::make_unique<Sound>("scream.wav");
+    initialized = true;
+}
+
 void WormTeam::AddWorm(std::unique_ptr<Worm> worm)
 {
     try
     {
+        if (!initialized)
+            throw std::logic_error("WormTeam is not initialized");
+        if (!worm || !worm->HasEntity())
+            throw std::invalid_argument("Team requires an initialized worm");
         worms.push_back(std::move(worm));
     }
     catch (...)
@@ -36,7 +48,8 @@ void WormTeam::RemoveWorm(Worm* worm)
 
     (*it)->CleanUp();
     worms.erase(it);
-    dieSound.Play();
+    if (dieSound)
+        dieSound->Play();
 
     if (worms.empty())
     {
@@ -120,6 +133,8 @@ void WormTeam::CleanUp()
     }
 
     worms.clear();
+    dieSound.reset();
+    initialized = false;
     activeWorm = 0;
 }
 

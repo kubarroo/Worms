@@ -1,36 +1,36 @@
-# Bezpieczne odwołania do encji i komponentów ECS
+# Safe ECS Entity And Component References
 
-## Zakres
+## Scope
 
-Zasady obowiązują w obecnym ECS i należy zachować je podczas migracji do EnTT. Uzupełniają [kontrakt własności i sprzątania](ownership-and-cleanup.md).
+These rules apply to the current ECS and must be preserved during migration to EnTT. They complement the [ownership and cleanup contract](ownership-and-cleanup.md).
 
-## Referencje do komponentów
+## Component References
 
-- Wskaźnik, referencja i `std::reference_wrapper` do komponentu są pożyczonym, krótkotrwałym dostępem, a nie własnością komponentu.
-- Nie przechowujemy ich w polach obiektów ani między klatkami. Długotrwały obserwator przechowuje uchwyt encji i pobiera komponent przy każdym użyciu.
-- Usuwanie komponentów lub encji może przesunąć inne komponenty w magazynie. Po takiej operacji wcześniejsze odwołanie może wskazywać dane innej encji.
-- Nie utrzymujemy odwołań przez wywołanie callbacku lub funkcji, która może usunąć encję albo komponent. Dotyczy to również `b2World::DestroyBody()`, które może wywołać callbacki końca kontaktu.
-- Potrzebne dane wejściowe kopiujemy przed takim wywołaniem. Po jego zakończeniu ponownie sprawdzamy ważność encji i pobieramy komponent, do którego chcemy zapisać wynik.
-- `Camera::X()` i `Camera::Y()` zwracają wartości, a `FocusPoint::GetPos()` zwraca kopię `Position`. Zmiany pozycji kamery wykonujemy przez jej metody, nie przez zachowaną referencję do komponentu.
+- A pointer, reference, or `std::reference_wrapper` to a component represents borrowed, short-lived access, not ownership of the component.
+- Do not store them in object fields or across frames. A long-lived observer stores an entity handle and retrieves the component on every use.
+- Removing components or entities may move other components in storage. After such an operation, an earlier reference may point to another entity's data.
+- Do not retain references across a callback or function call that may remove an entity or component. This also applies to `b2World::DestroyBody()`, which may invoke end-contact callbacks.
+- Copy required input data before such a call. After it returns, recheck entity validity and retrieve the component to which the result will be written.
+- `Camera::X()` and `Camera::Y()` return values, while `FocusPoint::GetPos()` returns a copy of `Position`. Change camera position through its methods, not through a retained component reference.
 
-## Uchwyty obserwatorów
+## Observer Handles
 
-- `EntityId` jest numerem slotu, nie trwałą tożsamością encji. Numer `0` jest poprawnym identyfikatorem, a zwolniony numer może zostać przydzielony ponownie.
-- Długotrwałe odwołania do cudzych encji używają `EntityHandle`, uzyskanego przez `World::GetHandle()`. Brak celu reprezentujemy przez pusty `std::optional`, nie przez numer `0`.
-- Przed użyciem uchwytu sprawdzamy `World::IsAlive(handle)`. Sprawdzenie obejmuje numer slotu, generację oraz właściciela uchwytu.
-- Sama ważność encji nie gwarantuje obecności `Position` ani innego komponentu. Po sprawdzeniu uchwytu pobieramy wymagany komponent przez `TryGetComponent()`.
-- Utrata encji lub wymaganego komponentu czyści cel. Obserwator nie przejmuje automatycznie nowej encji pod tym samym numerem ani nie wznawia śledzenia po ponownym dodaniu komponentu. Wymaga to jawnego ustawienia celu.
-- Broń po utracie rodzica zeruje ładowanie i nie strzela ani nie renderuje paska ładowania. Ponowne ustawienie tego samego ważnego rodzica zachowuje ładowanie; zmiana rodzica je zeruje.
-- Uchwyty i obiekty przechowujące pożyczony `World*` nie mogą przeżyć swojego świata. Muszą zostać odłączone lub zniszczone przed zniszczeniem `World`. Uchwyt nie przedłuża życia świata, a jego pole `owner` nie służy do dereferencji.
-- Właściciele encji mogą nadal używać `EntityId` w ramach własnego cyklu życia. Ich encji nie usuwamy niezależnie od właściciela, pozostawiając go z nieaktualnym numerem.
+- `EntityId` is a slot number, not a persistent entity identity. Number `0` is a valid identifier, and a released number may be assigned again.
+- Long-lived references to other objects' entities use `EntityHandle`, obtained through `World::GetHandle()`. Represent a missing target with an empty `std::optional`, not number `0`.
+- Check `World::IsAlive(handle)` before using a handle. The check includes the slot number, generation, and handle owner.
+- Entity validity alone does not guarantee the presence of `Position` or another component. After checking the handle, retrieve the required component through `TryGetComponent()`.
+- Losing the entity or a required component clears the target. An observer does not automatically adopt a new entity under the same number or resume tracking when a component is added again. The target must be set explicitly.
+- When the weapon loses its parent, it resets its charge and neither fires nor renders the charge bar. Setting the same valid parent again preserves the charge; changing the parent resets it.
+- Handles and objects storing a borrowed `World*` must not outlive their world. They must be detached or destroyed before `World` is destroyed. A handle does not extend the world's lifetime, and its `owner` field is not intended to be dereferenced.
+- Entity owners may continue to use `EntityId` within their own lifetimes. Do not remove their entities independently of their owners while leaving them with stale identifiers.
 
-## Callbacki cząstek i iteracja systemów
+## Particle Callbacks And System Iteration
 
-- Funkcje charakterystyki cząstek wywoływane przez `ParticleUpdater` obliczają i zwracają wartości. Nie usuwają bezpośrednio encji ani nie dodają lub usuwają komponentów podczas iteracji systemu.
-- System podczas iteracji korzysta z referencji do komponentów oraz zbioru subskrybowanych encji. Bezpośrednia zmiana struktury ECS z callbacku może unieważnić oba rodzaje dostępu.
-- Jeśli callback ma zlecać zmiany strukturalne, zapisuje polecenie do kolejki. Polecenia wykonujemy po zakończeniu iteracji, bez zachowanych odwołań do komponentów.
-- Kolejka odroczonych zmian komponentów nie jest obecnie ogólnym mechanizmem ECS. Przed dodaniem takiego zachowania do callbacków należy ją zaimplementować i dodać testy, w tym usunięcie bieżącej encji i ponowne wykorzystanie jej numeru.
+- Particle behavior functions called by `ParticleUpdater` compute and return values. They do not directly remove entities or add or remove components during system iteration.
+- During iteration, a system uses component references and its subscribed entity set. Direct structural ECS changes from a callback may invalidate both kinds of access.
+- If a callback needs to request structural changes, it records a command in a queue. Execute commands after iteration has finished, without retaining component references.
+- A deferred component-change queue is not currently a general ECS mechanism. Before adding such behavior to callbacks, implement it and add tests, including removal of the current entity and reuse of its number.
 
-## Kontrola zmian
+## Change Verification
 
-Przy zmianach dotyczących obserwatorów i callbacków sprawdzamy: przesuwanie komponentów, usunięcie celu, usunięcie wymaganego komponentu, ponowne przydzielenie numeru encji przed następną aktualizacją oraz sprzątanie obserwatorów przed zniszczeniem świata.
+When changing observers and callbacks, check component compaction, target removal, required component removal, entity number reuse before the next update, and observer cleanup before world destruction.

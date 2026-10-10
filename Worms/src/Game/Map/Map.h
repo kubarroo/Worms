@@ -12,8 +12,8 @@
 class Map : public GameObject
 {
 public:
-    Map(b2World* physicsWorld);
-    void Initialise(SDL_Renderer* renderer, World* world) override;
+    Map() = default;
+    void Initialise(const SceneContext& context) override;
     void Update() override;
     void CleanUp() override;
 
@@ -36,7 +36,7 @@ private:
 
     bool destroyed = false;
     SubscriptionId destructionSubscription = 0;
-    b2World* physicsWorld;
+    b2World* physicsWorld = nullptr;
     b2Body* mapBody = nullptr;
 
     Position bulltetPos;

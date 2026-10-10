@@ -16,7 +16,7 @@ public:
 
     void CleanUp() final;
     void Update() final;
-    void Initialise(SDL_Renderer* newRenderer, World* newWorld) final;
+    void Initialise(const SceneContext& context) final;
 
 private:
     friend struct ParticleSystemTestAccess;

@@ -1,5 +1,4 @@
 #include "Game/Player/Worm.h"
-#include "Game/GameScene.h"
 #include "Core/Input.h"
 #include "Core/ParticleSystem.h"
 #include "Core/Physics/ContactManager.h"
@@ -10,15 +9,19 @@
 #include <box2d/b2_fixture.h>
 #include <box2d/b2_polygon_shape.h>
 
-Worm::Worm(SDL_Renderer* newRenderer, World* newWorld, b2World* physicsWorld, const Camera& camera,
-           SDL_Texture* texture, GameScene* scene) : GameObject(scene)
+Worm::Worm(const Camera& camera, SDL_Texture* healthTexture, Position spawnPosition)
+    : camera(camera), healthTexture(healthTexture), spawnPosition(spawnPosition)
 {
+}
+
+void Worm::Initialise(const SceneContext& context)
+{
+    ColliderFactory::Get().RequirePhysicsWorld(context.physics);
+    GameObject::Initialise(context);
     try
     {
-        Initialise(newRenderer, newWorld);
-        static float posX = -2.f;
-        posX += 1.f;
-        auto& pos = world->AddComponent<Position>(objectId, {posX, 2});
+        jumpSound = std::make_unique<Sound>("jump.wav");
+        auto& pos = world->AddComponent<Position>(objectId, Position{spawnPosition.x, spawnPosition.y});
 
         physicsInfo.tag = PhysicsTag::WORM;
         physicsInfo.id = objectId;
@@ -63,8 +66,8 @@ Worm::Worm(SDL_Renderer* newRenderer, World* newWorld, b2World* physicsWorld, co
         groundedEndSubscription = ContactManager::Get().AddEvent(groundedId, CollisionType::END,
                                        [&](b2Contact*) { grounded = false; });
 
-        healthBar =
-            std::make_unique<HealthBar>(newRenderer, newWorld, objectId, camera, 100, texture);
+        healthBar = std::make_unique<HealthBar>(objectId, camera, 100, healthTexture);
+        healthBar->Initialise(context);
         world->AddComponent<RigidBody>(objectId, {collider->GetBody()});
     }
     catch (...)
@@ -89,7 +92,7 @@ void Worm::Update(std::vector<Worm*>& wormsToDelete)
 
     if (healthBar->getCurrentHp() <= 0)
     {
-        Scene().QueueAdd(
+        Context().objects.QueueAdd(
             std::make_unique<ParticleSystem>("blood.png", 2.f, pos.x, pos.y, 200));
         wormsToDelete.emplace_back(this);
     }
@@ -120,7 +123,7 @@ void Worm::Jump()
     grounded = false;
     rb.body->SetLinearVelocity(
         {rb.body->GetLinearVelocity().x * sqrtf(2.0), JUMP_FORCE * sqrtf(2.0)});
-    jumpSound.Play();
+    jumpSound->Play();
 }
 
 void Worm::CleanUp()
@@ -151,6 +154,7 @@ void Worm::CleanUp()
     }
     GameObject::CleanUp();
     spriteTexture.reset();
+    jumpSound.reset();
     active = grounded = false;
 }
 

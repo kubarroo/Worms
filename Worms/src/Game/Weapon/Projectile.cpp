@@ -5,7 +5,6 @@
 #include <box2d/b2_world.h>
 #include <SDL_image.h>
 #include "Core/ParticleSystem.h"
-#include "Game/GameScene.h"
 #include "Core/Physics/ColliderFactory.h"
 #include "Core/Physics/ContactManager.h"
 #include "ExceptionHandling/SDL_Exception.h"
@@ -25,16 +24,17 @@ void Projectile::Update()
 	{
 		createSensor = false;
 		if ( explosionSound ) explosionSound->Play();
-        Scene().QueueAdd(std::make_unique<ParticleSystem>("particle.png", params.explosionRadius * 3.f, pos.x, pos.y, 100));
+        Context().objects.QueueAdd(std::make_unique<ParticleSystem>(
+            "particle.png", params.explosionRadius * 3.f, pos.x, pos.y, 100));
 
-		world->GetComponent<RigidBody>( objectId ).body->SetAwake( true );
-		sensorInfo.id = objectId;
+        world->GetComponent<RigidBody>(objectId).body->SetAwake(true);
+        sensorInfo.id = objectId;
 		sensorInfo.tag = PhysicsTag::DESTRUCTION_FIELD;
 		b2CircleShape shape;
 		shape.m_radius = params.explosionRadius;
 		fixture = ColliderFactory::Get().CreateTriggerFixture( collider->GetBody(), &shape, sensorInfo );
-        Scene().RequestDestroy(*this);
-	}
+        Context().objects.RequestDestroy(*this);
+    }
 }
 
 void Projectile::CleanUp()
@@ -64,9 +64,10 @@ void Projectile::onCollision( b2Contact* constact )
 
 }
 
-void Projectile::Initialise( SDL_Renderer* newRenderer, World* newWorld )
+void Projectile::Initialise(const SceneContext& context)
 {
-    GameObject::Initialise(newRenderer, newWorld);
+    ColliderFactory::Get().RequirePhysicsWorld(context.physics);
+    GameObject::Initialise(context);
     try
     {
         timer.Reset();

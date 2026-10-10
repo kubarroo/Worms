@@ -15,7 +15,7 @@ public:
     using TexturePtr = Sdl::TexturePtr;
     Weapon(Camera& camera);
 
-    void Initialise(SDL_Renderer* newRenderer, World* newWorld) override;
+    void Initialise(const SceneContext& context) override;
     void Update() override;
     void Render() override;
     void CleanUp() override;

@@ -1,32 +1,32 @@
-# Weryfikacja cyklu życia
+# Lifetime Verification
 
-## Zakres automatyczny
+## Automated Coverage
 
-Testy w `ApplicationTests/TestGameLifetime.cpp` używają sterowników SDL `dummy` i renderera `software`. Weryfikują logikę i zasoby bez okna interaktywnej rozgrywki.
+Tests in `ApplicationTests/TestGameLifetime.cpp` use SDL `dummy` drivers and the `software` renderer. They verify logic and resources without an interactive gameplay window.
 
-| Scenariusz | Weryfikacja |
+| Scenario | Verification |
 | --- | --- |
-| Usunięcie robaka | Wybór następcy, destrukcja właściciela i zwolnienie jego encji oraz ciała |
-| Śmierć ostatniej drużyny | Brak aktywnego robaka, usunięcie subskrypcji, zakończenie efektu śmierci i powrót liczników do stanu początkowego |
-| Eksplozja pocisku | Utworzenie efektu i zlecenia usunięcia, usunięcie pocisku przez pętlę gry, brak pozostawionego ciała i subskrypcji |
-| Zakończenie cząstek | Przejście przez kolejki dodawania i usuwania, zwolnienie encji systemu i cząstek |
-| Deformacja terenu | Spadek liczby nieprzezroczystych pikseli, działająca tekstura zastępcza i stabilna liczba encji, ciał oraz subskrypcji |
-| Powtórzone zlecenie usunięcia | Jedno sprzątanie i jedna destrukcja obiektu |
-| Callbacki kolizji | Usunięcie własnej subskrypcji bez usunięcia innych słuchaczy, zgłoszenie wyjątku po kroku fizyki |
-| Wielokrotny start i zamknięcie | Puste kontenery i rejestr subskrypcji, brak zasobów aplikacji, zamknięte SDL, audio i ImGui |
-| Częściowa inicjalizacja | Sprzątanie po błędzie i możliwość powtórnego `CleanUp()` |
+| Worm removal | Successor selection, destruction of the owning object, and release of its entities and body |
+| Last team death | No active worm, subscription removal, completion of the death effect, and counters returning to their initial values |
+| Projectile explosion | Effect and removal request creation, projectile removal through the game loop, and no remaining body or subscription |
+| Particle expiry | Processing through addition and removal queues, release of the system entity and particle entities |
+| Terrain deformation | Reduced opaque pixel count, a working replacement texture, and stable entity, body, and subscription counts |
+| Repeated removal request | One cleanup and one object destruction |
+| Collision callbacks | Removing the callback's own subscription without removing other listeners, reporting an exception after the physics step |
+| Repeated startup and shutdown | Empty containers and subscription registry, no application resources, and SDL, audio, and ImGui shut down |
+| Partial initialization | Cleanup after failure and safe repeated `CleanUp()` |
 
-Powtarzalne cykle porównują dostępne sloty encji, ciała Box2D, subskrypcje oraz kolejki obiektów. Dodatkowo testy sprawdzają posiadane tekstury systemu cząstek i broni oraz teksturę i powierzchnię mapy przed i po sprzątaniu. Są to kontrole wybranych właścicieli, nie globalny licznik wszystkich alokacji SDL ani dowód braku wycieków.
+Repeated cycles compare available entity slots, Box2D bodies, subscriptions, and object queues. Tests also check owned particle-system and weapon textures, and the map texture and surface before and after cleanup. These checks cover selected owners; they are not a global counter of all SDL allocations or proof that no leaks exist.
 
-## Uruchomienie
+## Running Tests
 
-Po kompilacji `worms_tests`:
+After building `worms_tests`:
 
 ```powershell
 ctest --test-dir build/debug --output-on-failure
 ```
 
-Wielokrotne uruchomienie wszystkich testów w jednym procesie pomaga wykrywać stan pozostawiony przez wcześniejsze testy. Katalog roboczy musi zawierać zasoby gry:
+Running all tests repeatedly in one process helps detect state left behind by earlier tests. The working directory must contain the game assets:
 
 ```powershell
 Push-Location Worms
@@ -37,9 +37,9 @@ try {
 }
 ```
 
-## Diagnostyka pamięci
+## Memory Diagnostics
 
-`TestMain.cpp` umożliwia diagnostykę sterty MSVC Debug przez `WORMS_CRT_DIAGNOSTICS=1`. Sprawdza integralność sterty przed i po każdym teście oraz włącza raport wycieków CRT przy końcu procesu. Raporty trafiają do standardowego wyjścia błędów, bez modalnego okna.
+`TestMain.cpp` enables MSVC Debug heap diagnostics through `WORMS_CRT_DIAGNOSTICS=1`. It checks heap integrity before and after each test and enables a CRT leak report at process exit. Reports go to standard error without a modal dialog.
 
 ```powershell
 $previous = $env:WORMS_CRT_DIAGNOSTICS
@@ -53,19 +53,19 @@ try {
 }
 ```
 
-- Nieprawidłowa sterta powoduje błąd asercji testowej. Raport wycieków przy końcu procesu wymaga osobnej analizy i sam nie zmienia kodu wyjścia programu na błąd.
-- Zielony wynik testów nie zastępuje sprawdzenia raportu wycieków. Zachowane bufory singletonów i bibliotek trzeba odróżnić od zasobów, które powinny zostać zwolnione.
-- CRT sprawdza alokacje obsługiwane przez dany runtime Debug. Nie obejmuje automatycznie całej pamięci bibliotek zewnętrznych, sterowników ani GPU.
-- Test kamery inicjalizuje podsystem zegara w lokalnym zakresie i zamyka SDL po zniszczeniu obiektów. Po całym zestawie runner zgłasza pozostawione aktywne podsystemy, następnie wykonuje końcowe `SDL_Init(SDL_INIT_TIMER)` i `SDL_Quit()`. Pozwala to posprzątać dane zegara i wątku utworzone także przez API wywołane poza pełną inicjalizacją SDL, np. podczas testów błędów. Raport CRT pozostaje włączony.
-- AddressSanitizer wymaga osobnej kompilacji z instrumentacją. Obecność jego DLL w instalacji MSVC nie oznacza, że zwykły build Debug wykrywa use-after-free. Ten etap nie włącza instrumentacji ASan.
+- An invalid heap causes a test assertion failure. The leak report at process exit requires separate analysis and does not itself change the program's exit code to indicate failure.
+- Passing tests do not replace inspection of the leak report. Retained singleton and library buffers must be distinguished from resources that should have been released.
+- The CRT checks allocations handled by the corresponding Debug runtime. It does not automatically cover all memory used by external libraries, drivers, or the GPU.
+- The camera test initializes the timer subsystem within a local scope and shuts down SDL after its objects have been destroyed. After the entire suite, the runner reports any remaining active subsystems, then performs a final `SDL_Init(SDL_INIT_TIMER)` and `SDL_Quit()`. This cleans timer and thread data also created by API calls outside full SDL initialization, for example in failure tests. The CRT report remains enabled.
+- AddressSanitizer requires a separate instrumented build. Having its DLL in an MSVC installation does not mean that an ordinary Debug build detects use-after-free. This stage does not enable ASan instrumentation.
 
-## Kontrola interaktywna
+## Interactive Checks
 
-Testy headless nie zastępują sprawdzenia normalnych sterowników audio i grafiki. W rozgrywce należy sprawdzić śmierć robaka, eliminację ostatniej drużyny, eksplozję po kontakcie, widoczną deformację terenu, zanik cząstek oraz zamknięcie okna podczas aktywnego pocisku i efektów.
+Headless tests do not replace verification with normal audio and graphics drivers. During gameplay, check worm death, elimination of the last team, explosions on contact, visible terrain deformation, particle fading, and window closure while a projectile and effects are active.
 
-## Stan wykonania
+## Execution Status
 
-- Przed dodaniem testów tego etapu uruchomiono istniejący zestaw: **70/70 testów przeszło**.
-- Dodano sześć testów cykli życia oraz kontrole wybranych właścicieli zasobów i stanu po sprzątaniu. Próba kompilacji nowych zmian została zatrzymana przez błąd MSVC `C1902` w sandboxie; kompilacja poza sandboxem nie została zatwierdzona.
-- Dostarczony log `lifetime-crt.log` potwierdza 10 przebiegów po 76 testów bez błędów testowych. Raport końcowy CRT zawierał pięć bloków o łącznym rozmiarze 213 bajtów. Osobne uruchomienie testu kamery odtworzyło 85 bajtów stanu zegara SDL, a testy błędów inicjalizacji odtworzyły alokacje związane z danymi wątku i buforem błędów. Po zmianie sprzątania runnera diagnostykę należy powtórzyć; wcześniejszy raport nie potwierdza jeszcze braku wycieków.
-- Wynik po ostatniej poprawce sprzątania SDL, końcowy raport CRT oraz kontrolę interaktywną należy odnotować oddzielnie po ich rzeczywistym wykonaniu. Poprzednie zielone testy nie zastępują ponownej diagnostyki.
+- Before adding tests for this stage, the existing suite was run: **70/70 tests passed**.
+- Six lifetime-cycle tests were added, together with checks of selected resource owners and post-cleanup state. An attempt to build the new changes was stopped by MSVC error `C1902` inside the sandbox; a build outside the sandbox was not approved.
+- The provided `lifetime-crt.log` confirms 10 runs of 76 tests without test failures. The final CRT report contained five blocks totaling 213 bytes. A separate camera test run reproduced 85 bytes of SDL timer state, while initialization failure tests reproduced allocations related to thread data and the error buffer. Diagnostics must be repeated after the runner cleanup changes; the earlier report does not yet confirm that there are no leaks.
+- Results after the latest SDL cleanup fix, the final CRT report, and interactive checks must be recorded separately after they have actually been performed. Earlier passing tests do not replace another diagnostics run.

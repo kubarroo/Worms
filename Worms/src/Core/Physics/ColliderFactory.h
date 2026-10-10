@@ -13,6 +13,13 @@ public:
 
     void Init(b2World* physicsWorld);
     bool HasPhysicsWorld() const noexcept { return physicsWorld != nullptr; }
+    void RequirePhysicsWorld(const b2World& expected) const
+    {
+        if (!physicsWorld)
+            throw std::logic_error("ColliderFactory has no physics world");
+        if (physicsWorld != &expected)
+            throw std::invalid_argument("Scene context uses a different physics world");
+    }
 
     static ColliderFactory& Get()
     {

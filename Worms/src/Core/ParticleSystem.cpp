@@ -1,5 +1,4 @@
 #include "ParticleSystem.h"
-#include "Game/GameScene.h"
 #include <stdexcept>
 
 ParticleSystem::ParticleSystem(std::string particleImg, float startScale, float startPosX,
@@ -41,12 +40,12 @@ void ParticleSystem::Update()
         return;
     }
 
-    Scene().RequestDestroy(*this);
+    Context().objects.RequestDestroy(*this);
 }
 
-void ParticleSystem::Initialise(SDL_Renderer* newRenderer, World* newWorld)
+void ParticleSystem::Initialise(const SceneContext& context)
 {
-    GameObject::Initialise(newRenderer, newWorld);
+    GameObject::Initialise(context);
     try
     {
         texture.reset(IMG_LoadTexture(renderer, particleImg.c_str()));

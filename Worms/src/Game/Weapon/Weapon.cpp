@@ -4,17 +4,16 @@
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Tags.h"
 #include "Game/Weapon/Weapon.h"
-#include "Game/GameScene.h"
 #include "SDL_image.h"
 
 Weapon::Weapon( Camera& camera ) : camera( camera )
 {
 }
 
-void Weapon::Initialise( SDL_Renderer* newRenderer, World* newWorld )
+void Weapon::Initialise(const SceneContext& context)
 {
-	GameObject::Initialise( newRenderer, newWorld );
-	try
+    GameObject::Initialise(context);
+    try
 	{
 		world->AddComponent<Position>( objectId, { 0, 0 } );
 		world->AddComponent<Rotation>( objectId, { 0 } );
@@ -97,8 +96,8 @@ void Weapon::Update()
 			proc->SetExplosionSound( explosionSound );
 			proc->SetCamera( &camera );
 			proc->SetBounciness( weaponParams.bounciness );
-            Scene().QueueAdd(std::move(projectile));
-		}
+            Context().objects.QueueAdd(std::move(projectile));
+        }
 		force = 0;
 	}
 }

@@ -8,7 +8,7 @@
 class FocusPoint : public GameObject
 {
 public:
-    FocusPoint(SDL_Renderer* newRenderer, World* newWorld);
+    FocusPoint() = default;
     void CleanUp() override
     {
         ClearTarget();

@@ -3,18 +3,21 @@
 #include "ExceptionHandling/SDL_Exception.h"
 #include <SDL_image.h>
 
-HealthBar::HealthBar(SDL_Renderer* renderer, World* world, EntityId newParentId,
-                     const Camera& camera, int health, SDL_Texture* texture)
-    : camera(camera)
+HealthBar::HealthBar(EntityId parentId, const Camera& camera, int health, SDL_Texture* texture)
+    : parentId(parentId), initialHealth(health), texture(texture), camera(camera)
 {
+}
+
+void HealthBar::Initialise(const SceneContext& context)
+{
+    GameObject::Initialise(context);
     try
     {
         SDL_CHECK(texture);
-        Initialise(renderer, world);
 
         world->AddComponent<Position>(objectId, {0, 0});
-        world->AddComponent<Health>(objectId, {100, 100});
-        world->AddComponent<Follow>(objectId, {world->GetHandle(newParentId), 0.0, 0.3});
+        world->AddComponent<Health>(objectId, {initialHealth, initialHealth});
+        world->AddComponent<Follow>(objectId, {world->GetHandle(parentId), 0.0, 0.3});
         healthBar = texture;
         SDL_CHECK(healthBar);
     }

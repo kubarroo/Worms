@@ -12,8 +12,8 @@ class Projectile : public GameObject
 {
 public:
 	Projectile( float posX, float posY, float vX, float vY );
-	void Initialise( SDL_Renderer* newRenderer, World* newWorld ) override;
-	void Update() override;
+    void Initialise(const SceneContext& context) override;
+    void Update() override;
 	void CleanUp() override;
 
 	void SetExplosionOffset( float time ) { params.explosionOffset = time; }

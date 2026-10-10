@@ -1,4 +1,5 @@
 #pragma once
+#include "Core/SceneContext.h"
 #include <deque>
 #include <memory>
 #include <vector>
@@ -13,11 +14,11 @@ class WeaponManager;
 class Music;
 class GameObject;
 
-class GameScene
+class GameScene : public ObjectCommands
 {
 public:
     explicit GameScene(SDL_Renderer* renderer);
-    ~GameScene();
+    ~GameScene() override;
     GameScene(const GameScene&) = delete;
     GameScene& operator=(const GameScene&) = delete;
     GameScene(GameScene&&) = delete;
@@ -27,8 +28,9 @@ public:
     void Update();
     void Render();
     void RenderDebug();
-    void QueueAdd(std::unique_ptr<GameObject> object);
-    void RequestDestroy(GameObject& object);
+    const SceneContext& Context() const;
+    void QueueAdd(std::unique_ptr<GameObject> object) override;
+    void RequestDestroy(GameObject& object) override;
     // Immediate initialization is allowed only outside frame processing.
     GameObject& AddObject(std::unique_ptr<GameObject> object);
     // Reports cleanup errors and continues releasing the remaining scene resources.
@@ -55,6 +57,7 @@ private:
     std::deque<GameObject*> pendingRemovals;
     std::unique_ptr<World> world;
     std::unique_ptr<b2World> physicsWorld;
+    std::unique_ptr<SceneContext> context;
     std::unique_ptr<b2ColliderDraw> b2DebugDraw;
     std::unique_ptr<WormManager> wormManager;
     std::unique_ptr<WeaponManager> weaponManager;

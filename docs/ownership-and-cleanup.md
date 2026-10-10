@@ -1,131 +1,131 @@
-# Własność zasobów i cykl życia obiektów
+# Resource Ownership And Object Lifetimes
 
-## Status i zakres
+## Status And Scope
 
-Dokument definiuje proponowany kontrakt dla fazy 1: stabilizacji własności, sprzątania i zamykania aplikacji. Nie oznacza, że opisane zasady są już zaimplementowane.
+This document defines the proposed contract for phase 1: stabilizing ownership, cleanup, and application shutdown. It does not imply that the rules described here have already been implemented.
 
-Podstawą jest wcześniejszy przegląd projektu. Podczas tworzenia dokumentu narzędzie terminala nie pozwoliło ponownie odczytać plików, dlatego aktualny kod należy zweryfikować przed implementacją. Dokument nie obejmuje migracji do SDL3, EnTT, wprowadzenia Scene ani pełnego menedżera zasobów.
+It is based on an earlier project review. While this document was being written, the terminal tool did not allow the files to be read again, so the current code must be verified before implementation. This document does not cover migration to SDL3 or EnTT, introducing a scene, or a full resource manager.
 
-## Reguły własności
+## Ownership Rules
 
-Zasady krótkotrwałego dostępu do komponentów, ważności uchwytów encji i ograniczeń callbacków opisuje dokument [Bezpieczne odwołania do encji i komponentów ECS](ecs-reference-safety.md).
+Rules for short-lived component access, entity handle validity, and callback restrictions are described in [Safe ECS Entity And Component References](ecs-reference-safety.md).
 
-- Każdy zasób ma jednego jawnego właściciela odpowiedzialnego za zwolnienie.
-- Pole przechowywane przez wartość albo unique_ptr oznacza własność. Surowy wskaźnik lub referencja oznacza dostęp bez prawa do usuwania.
-- Współdzielony dostęp do tekstury lub dźwięku nie wymaga automatycznie shared_ptr. Właściciel musi żyć dłużej niż wszyscy użytkownicy zasobu.
-- Komponenty Sprite i RigidBody przechowują pożyczone uchwyty. Usunięcie komponentu samo w sobie nie zwalnia tekstury ani ciała Box2D.
-- Kopiowanie właściciela zasobu jest zabronione, chyba że klasa definiuje poprawną semantykę kopii. Przenoszenie musi zachować adresy, od których zależą callbacki i userData, albo poprawić te odwołania.
-- Wskaźniki zaczynają od nullptr, a identyfikatory od jawnego stanu nieważnego zgodnego z aktualnym ECS. Nie należy zakładać, że identyfikator 0 jest nieważny.
+- Every resource has one explicit owner responsible for releasing it.
+- A field stored by value or through unique_ptr represents ownership. A raw pointer or reference represents access without permission to delete.
+- Shared access to a texture or sound does not automatically require shared_ptr. The owner must outlive every user of the resource.
+- Sprite and RigidBody components store borrowed handles. Removing a component does not itself release the texture or Box2D body.
+- Copying a resource owner is prohibited unless the class defines correct copy semantics. Moving must preserve addresses used by callbacks and userData, or update those references.
+- Pointers start as nullptr, and identifiers start in an explicit invalid state compatible with the current ECS. Do not assume that identifier 0 is invalid.
 
-## Tabela własności
+## Ownership Table
 
-Tabela opisuje docelową odpowiedzialność w ramach obecnej struktury klas. Nie narzuca jeszcze konkretnej implementacji uchwytów RAII.
+The table describes the intended responsibilities within the existing class structure. It does not yet prescribe a specific RAII handle implementation.
 
-| Zasób / obiekt | Właściciel | Obserwatorzy / użytkownicy | Odpowiedzialność za zwolnienie |
+| Resource / object | Owner | Observers / users | Release responsibility |
 | --- | --- | --- | --- |
-| SDL_Window, SDL_Renderer | App | Game i obiekty renderujące | App; renderer przed oknem, po zwolnieniu wszystkich tekstur |
-| Inicjalizacja SDL, audio i backendów ImGui | App | cała aplikacja | App; zamyka tylko poprawnie zainicjalizowane podsystemy |
-| World ECS, menedżery ECS | App / World | GameObject, systemy i menedżery gry | World po odłączeniu wszystkich obiektów |
-| Systemy i magazyny komponentów | odpowiednie menedżery ECS | World | menedżery; zweryfikować destruktory baz polimorficznych |
-| b2World i debug draw | App | ColliderFactory, obiekty fizyki | App po usunięciu obiektów i odpięciu listenera |
-| WormManager, WeaponManager, Music | Game | logika gry | Game; Music przed zamknięciem audio |
-| WormTeam | WormManager | aktywna drużyna i logika tur | WormManager po odłączeniu robaków |
-| Worm | WormTeam | aktywny robak, kamera, broń | WormTeam po Worm::CleanUp() |
-| HealthBar robaka | Worm | renderowanie i obsługa obrażeń | Worm po odłączeniu encji paska |
-| Tekstura pasków zdrowia drużyny | WormTeam | HealthBar należące do jej robaków | WormTeam po zniszczeniu wszystkich pasków |
-| Map, Camera, Weapon, Projectile, ParticleSystem w aktywnej liście | GameObject::activeObjs | Game i menedżery | kontener po CleanUp() każdego zainicjalizowanego obiektu |
-| Obiekty w objsToAdd | GameObject::objsToAdd | logika tworzenia obiektów | kontener; po aktywacji własność przechodzi do activeObjs |
-| Wpisy objsToDelete | brak własności; kolejka poleceń | pętla gry | tylko zlecenie usunięcia; nie wykonuje niezależnego delete |
-| WeaponImpl i dźwięki / tekstury konfiguracji broni | WeaponManager | Weapon i Projectile | WeaponManager po odłączeniu wszystkich użytkowników |
-| Tekstura paska ładowania | Weapon | Weapon::Render() | Weapon przed zniszczeniem renderera |
-| Tekstura sprite robaka, obecnie ładowana osobno | Worm | komponent Sprite robaka | Worm; HealthBar nie przejmuje jej własności |
-| Tekstura efektu cząsteczkowego | ParticleSystem | Sprite jego cząsteczek | ParticleSystem po usunięciu encji cząsteczek |
-| Dane obrazu terenu i jego aktualna tekstura | Map / jego wrapper PhysicTexture | generowanie terenu i Sprite mapy | Map poprzez jednego właściciela; sprawdzić powierzchnię i bufor pikseli |
-| Wrapper Collider | Worm lub Projectile | logika danego obiektu | obiekt posiadający wrapper |
-| Ciało i fixtures Box2D | b2World fizycznie przechowuje; obiekt gry odpowiada za wcześniejsze usunięcie | RigidBody, Collider i callbacki | CleanUp() obiektu wywołuje DestroyBody raz; fixture usuwa się wraz z ciałem |
-| Dane wskazywane przez body / fixture userData | obiekt gry, który je udostępnia | Box2D i ContactManager | muszą istnieć aż do zakończenia DestroyBody; nie wskazują na tymczasowe argumenty |
-| Encje robaka, sensora, paska, mapy, broni i pocisku | obiekt, który je utworzył | ECS, kamera i logika gry | CleanUp() twórcy usuwa wszystkie jego encje |
-| Encja ParticleSystem i encje jego cząsteczek | ParticleSystem | systemy ECS | ParticleSystem usuwa zarówno cząsteczki, jak i własną encję |
-| FocusPoint i jego encja | Camera / FocusPoint | śledzenie celu | Camera odkłada sprzątanie encji na czas, gdy ECS jeszcze istnieje |
-| Mix_Chunk, Mix_Music | Sound, Music | odtwarzanie audio | wrapper po zatrzymaniu użycia zasobu, przed zamknięciem audio |
-| Subskrypcja kolizji | obiekt rejestrujący callback | ContactManager przechowuje funkcję | obiekt wyrejestrowuje ją przed zniszczeniem stanu przechwyconego przez callback |
-| noTargetEvent kamery | Camera przechowuje funkcję; WormManager odpowiada za ważność przechwyconego siebie | Camera::Update() | odpiąć przed zniszczeniem WormManager |
+| SDL_Window, SDL_Renderer | App | Game and rendering objects | App; renderer before window, after all textures have been released |
+| SDL, audio, and ImGui backend initialization | App | Entire application | App; shuts down only successfully initialized subsystems |
+| ECS World and ECS managers | App / World | GameObject, systems, and gameplay managers | World after all objects have been detached |
+| Systems and component storage | Respective ECS managers | World | Managers; verify polymorphic base destructors |
+| b2World and debug draw | App | ColliderFactory and physics objects | App after objects have been removed and the listener detached |
+| WormManager, WeaponManager, Music | Game | Gameplay logic | Game; Music before audio shutdown |
+| WormTeam | WormManager | Active team and turn logic | WormManager after worms have been detached |
+| Worm | WormTeam | Active worm, camera, weapon | WormTeam after Worm::CleanUp() |
+| Worm health bar | Worm | Rendering and damage handling | Worm after the health-bar entity has been detached |
+| Team health-bar texture | WormTeam | HealthBar objects belonging to its worms | WormTeam after all health bars have been destroyed |
+| Map, Camera, Weapon, Projectile, ParticleSystem in the active list | GameObject::activeObjs | Game and managers | Container after CleanUp() on every initialized object |
+| Objects in objsToAdd | GameObject::objsToAdd | Object creation logic | Container; ownership transfers to activeObjs on activation |
+| Entries in objsToDelete | No ownership; command queue | Game loop | Removal request only; does not perform an independent delete |
+| WeaponImpl and weapon configuration sounds / textures | WeaponManager | Weapon and Projectile | WeaponManager after all users have been detached |
+| Charge-bar texture | Weapon | Weapon::Render() | Weapon before renderer destruction |
+| Worm sprite texture, currently loaded separately | Worm | Worm Sprite component | Worm; HealthBar does not take ownership |
+| Particle effect texture | ParticleSystem | Sprite components of its particles | ParticleSystem after particle entities have been removed |
+| Terrain image data and its current texture | Map / its PhysicTexture wrapper | Terrain generation and map Sprite | Map through a single owner; check the surface and pixel buffer |
+| Collider wrapper | Worm or Projectile | Logic of the corresponding object | Object owning the wrapper |
+| Box2D body and fixtures | b2World physically stores them; the gameplay object is responsible for earlier removal | RigidBody, Collider, and callbacks | Object CleanUp() calls DestroyBody once; fixtures are removed with the body |
+| Data referenced by body / fixture userData | Gameplay object providing the data | Box2D and ContactManager | Must remain alive until DestroyBody finishes; must not reference temporary arguments |
+| Worm, sensor, health-bar, map, weapon, and projectile entities | Object that created them | ECS, camera, and gameplay logic | Creator's CleanUp() removes all of its entities |
+| ParticleSystem entity and its particle entities | ParticleSystem | ECS systems | ParticleSystem removes both the particles and its own entity |
+| FocusPoint and its entity | Camera / FocusPoint | Target tracking | Camera schedules entity cleanup while the ECS still exists |
+| Mix_Chunk, Mix_Music | Sound, Music | Audio playback | Wrapper after resource use has stopped, before audio shutdown |
+| Collision subscription | Object registering the callback | ContactManager stores the function | Object unregisters it before destroying state captured by the callback |
+| Camera noTargetEvent | Camera stores the function; WormManager is responsible for the validity of the captured manager | Camera::Update() | Detach before WormManager destruction |
 
-Singletony ContactManager i ColliderFactory nie posiadają obiektów gry ani świata fizyki. Ich pożyczone odwołania i rejestry trzeba wyczyścić przed zniszczeniem zależności. Sposób resetowania singletonów wymaga sprawdzenia aktualnego API.
+The ContactManager and ColliderFactory singletons do not own gameplay objects or the physics world. Their borrowed references and registries must be cleared before their dependencies are destroyed. The singleton reset mechanism must be checked against the current API.
 
-## Kontrakt CleanUp()
+## CleanUp() Contract
 
-### Cel i wywołujący
+### Purpose And Caller
 
-CleanUp() odczepia obiekt od działającego świata gry. Właściciel wywołuje je przed zniszczeniem zainicjalizowanego obiektu, zarówno podczas rozgrywki, jak i zamykania aplikacji.
+CleanUp() detaches an object from the running game world. The owner calls it before destroying an initialized object, both during gameplay and during application shutdown.
 
-Destruktor zwalnia lokalne zasoby posiadane przez obiekt. Nie polegamy na wywołaniu wirtualnego CleanUp() z destruktora GameObject: takie wywołanie nie wykona implementacji klasy pochodnej. App i GameObject muszą mieć wirtualne destruktory, jeżeli obiekty pochodne są usuwane przez wskaźnik do bazy.
+The destructor releases local resources owned by the object. We do not rely on a virtual CleanUp() call from the GameObject destructor: such a call would not execute the derived class implementation. App and GameObject must have virtual destructors if derived objects are deleted through base pointers.
 
-### Wymagania
+### Requirements
 
-- CleanUp() jest idempotentne: kolejne wywołanie nie usuwa zasobów drugi raz.
-- Działa po częściowej inicjalizacji, sprawdzając rzeczywiście pozyskane zasoby.
-- Nie propaguje wyjątków podczas zamykania. Docelowo powinno spełniać kontrakt noexcept; przed dodaniem deklaracji trzeba zweryfikować wywoływane operacje.
-- Po rozpoczęciu sprzątania obiekt nie wykonuje Update(), Render() ani nowych callbacków wymagających jego zasobów.
-- Usuwa wszystkie encje utworzone przez obiekt, łącznie z pomocniczymi sensorami i efektami.
-- Odłącza subskrypcje przed usunięciem stanu, do którego callbacki się odwołują.
-- DestroyBody jest wykonywane poza krokiem symulacji, przy niezablokowanym świecie Box2D. Dane userData pozostają ważne przez całe wywołanie.
-- Po zwolnieniu ciała i encji ich uchwyty są unieważniane. Samo wyzerowanie Sprite.texture nie zwalnia tekstury.
-- Zwolnienie lokalnych tekstur może nastąpić w destruktorze, ale dopiero po usunięciu komponentów, które ich używają, i przed zniszczeniem renderera.
+- CleanUp() is idempotent: subsequent calls do not remove resources a second time.
+- It works after partial initialization by checking resources that were actually acquired.
+- It does not propagate exceptions during shutdown. Ultimately it should satisfy a noexcept contract; verify the operations it calls before adding the declaration.
+- Once cleanup starts, the object does not execute Update(), Render(), or new callbacks that require its resources.
+- It removes all entities created by the object, including auxiliary sensors and effects.
+- It detaches subscriptions before removing state referenced by callbacks.
+- DestroyBody runs outside the simulation step, while the Box2D world is unlocked. userData remains valid throughout the call.
+- Body and entity handles are invalidated after release. Merely clearing Sprite.texture does not free the texture.
+- Local textures may be released in the destructor, but only after removing components that use them and before destroying the renderer.
 
-### Kolejność dla pojedynczego obiektu
+### Order For A Single Object
 
-1. Oznaczyć obiekt jako nieaktywny / sprzątany i uniemożliwić kolejne aktualizacje.
-2. Unieważnić odwołania obserwatorów albo zagwarantować sprawdzenie ważności celu przed kolejnym użyciem.
-3. Wyrejestrować callbacki przechwytujące obiekt oraz zatrzymać zewnętrzne użycie lokalnych zasobów.
-4. Odłączyć posiadane obiekty pomocnicze, jeśli ich sprzątanie wymaga nadal istniejących encji rodzica.
-5. Zniszczyć posiadane ciała fizyki, zachowując ważność userData i encji do końca operacji.
-6. Usunąć pozostałe encje pomocnicze i encję główną; unieważnić uchwyty.
-7. Zniszczyć obiekt przez jego właściciela. Destruktor zwalnia lokalne zasoby.
+1. Mark the object inactive / being cleaned and prevent further updates.
+2. Invalidate observer references or ensure target validity is checked before the next use.
+3. Unregister callbacks capturing the object and stop external use of local resources.
+4. Detach owned auxiliary objects if their cleanup still requires the parent's entities.
+5. Destroy owned physics bodies, keeping userData and entities valid until the operation completes.
+6. Remove remaining auxiliary entities and the main entity; invalidate handles.
+7. Let the owner destroy the object. The destructor releases local resources.
 
-Dokładny porządek obiektów pomocniczych wynika z ich zależności. Nie wystarczy wywołać bazowego CleanUp(), jeżeli klasa tworzy dodatkowe encje, ciała lub subskrypcje.
+The exact order for auxiliary objects follows their dependencies. Calling only the base CleanUp() is insufficient if the class creates additional entities, bodies, or subscriptions.
 
-### Kolejki i obserwatorzy
+### Queues And Observers
 
-- Wielokrotne zgłoszenie tego samego obiektu do usunięcia skutkuje jednym sprzątaniem i jednym zniszczeniem.
-- Przetwarzanie usunięcia odbywa się w bezpiecznym punkcie pętli, poza iteracją aktualizującą dany kontener i poza krokiem Box2D.
-- Zamykanie obejmuje aktywne obiekty i obiekty oczekujące na dodanie. Te drugie mogły już pozyskać zasoby w konstruktorze.
-- Przed usunięciem robaka lub drużyny poprawiane są wskaźniki aktywnego robaka i aktywnej drużyny.
-- Cel kamery i rodzic broni stają się nieważne po usunięciu odpowiedniej encji. Recykling identyfikatora nie może przypadkowo przepiąć ich na nowy obiekt.
-- Camera nie przechowuje trwale Position*: obecny magazyn komponentów może przenosić elementy przy usuwaniu. Komponent pobierany jest przez ważny identyfikator encji przy użyciu.
+- Requesting removal of the same object multiple times results in one cleanup and one destruction.
+- Removal is processed at a safe point in the loop, outside iteration over the affected container and outside the Box2D step.
+- Shutdown covers active objects and objects awaiting addition. The latter may already have acquired resources in their constructors.
+- Active-worm and active-team pointers are updated before removing a worm or team.
+- The camera target and weapon parent become invalid when their corresponding entities are removed. Identifier reuse must not accidentally attach them to a new object.
+- Camera does not retain a Position*: the current component storage may move elements during removal. Components are retrieved through a valid entity identifier when needed.
 
-## Kolejność zamykania aplikacji
+## Application Shutdown Order
 
-Zamykanie musi działać również po błędzie inicjalizacji. Poniższa kolejność jest proponowana dla obecnych zależności; wymaga jawnej koordynacji przez Game i App, ponieważ statyczne kontenery nie gwarantują poprawnego czasu zniszczenia.
+Shutdown must also work after initialization fails. The following order is proposed for the existing dependencies; it requires explicit coordination by Game and App because static containers do not guarantee correct destruction timing.
 
-1. Zatrzymać pętlę gry, aktualizacje, tworzenie obiektów i inicjowanie nowych efektów audio.
-2. Odłączyć noTargetEvent oraz powiązania aktywnego robaka, drużyny, celu kamery i rodzica broni. Odłączyć callbacki kolizji obiektów przeznaczonych do usunięcia.
-3. Wywołać CleanUp() wszystkich aktywnych oraz częściowo zainicjalizowanych oczekujących obiektów, gdy ECS, Box2D i menedżery zasobów nadal istnieją. Odłączyć robaki, paski zdrowia i FocusPoint.
-4. Zniszczyć obiekty korzystające z zasobów konfiguracji broni, w tym pociski i Weapon. Opróżnić activeObjs, objsToAdd i objsToDelete; nie tworzyć nowych obiektów podczas sprzątania.
-5. Zniszczyć WormManager i jego drużyny oraz WeaponManager. Paski zdrowia muszą zostać zniszczone przed teksturami drużyn. Zwolnić pozostałe tekstury i wrappery obiektów gry.
-6. Zatrzymać odtwarzanie muzyki i kanałów, a potem zwolnić pozostałe Sound i Music. Zweryfikować sposób zatrzymania użycia zasobów z aktualną wersją SDL_mixer.
-7. Wyczyścić ContactManager, odpiąć listener i debug draw od Box2D oraz zresetować pożyczone odwołanie ColliderFactory do b2World.
-8. Zniszczyć światy ECS i Box2D oraz debug draw po zakończeniu wszystkich operacji obiektów gry.
-9. Zamknąć backendy ImGui i kontekst, gdy renderer i okno jeszcze istnieją.
-10. Zamknąć audio i podsystemy bibliotek pomocniczych odpowiednio do faktycznie wykonanej inicjalizacji.
-11. Zniszczyć renderer, następnie okno, na końcu zamknąć SDL.
+1. Stop the game loop, updates, object creation, and initiation of new audio effects.
+2. Detach noTargetEvent and references to the active worm, team, camera target, and weapon parent. Detach collision callbacks of objects scheduled for removal.
+3. Call CleanUp() on all active objects and partially initialized pending objects while the ECS, Box2D, and resource managers still exist. Detach worms, health bars, and FocusPoint.
+4. Destroy objects using weapon configuration resources, including projectiles and Weapon. Empty activeObjs, objsToAdd, and objsToDelete; do not create new objects during cleanup.
+5. Destroy WormManager and its teams, then WeaponManager. Health bars must be destroyed before team textures. Release remaining textures and gameplay object wrappers.
+6. Stop music and channel playback, then release remaining Sound and Music objects. Verify how to stop resource use with the current SDL_mixer version.
+7. Clear ContactManager, detach the listener and debug draw from Box2D, and reset ColliderFactory's borrowed b2World reference.
+8. Destroy the ECS and Box2D worlds and debug draw after all gameplay object operations have completed.
+9. Shut down ImGui backends and its context while the renderer and window still exist.
+10. Shut down audio and auxiliary library subsystems according to the initialization that actually completed.
+11. Destroy the renderer, then the window, and finally shut down SDL.
 
-Normalne wyjście i obsługa błędu inicjalizacji korzystają z tego samego kontraktu. Zasoby pozyskane w konstruktorze, który rzuci wyjątek, muszą być zabezpieczone lokalnym RAII, ponieważ destruktor niedokonstruowanego obiektu nie zostanie wywołany.
+Normal exit and initialization failure handling use the same contract. Resources acquired in a constructor that throws must be protected by local RAII because the destructor of an incompletely constructed object will not run.
 
-## Miejsca do potwierdzenia przed implementacja
+## Items To Confirm Before Implementation
 
-- Aktualna lista zasobów i destruktory Sound, Music, PhysicTexture oraz baz ECS.
-- Wszystkie miejsca tworzenia i wymiany tekstur, w tym przebudowa terenu i nieudane ładowanie.
-- Czas życia zasobów WeaponManager pożyczanych przez Projectile.
-- Konstrukcja i inicjalizacja FocusPoint oraz sprzątanie jego encji.
-- Przypadki callbacków wykonywanych podczas DestroyBody i zasady modyfikacji rejestru listenerów podczas wywołania.
-- Wszystkie adresy przekazywane do userData; szczególnie argumenty tymczasowe oraz możliwość przeniesienia obiektu.
-- Możliwość zidentyfikowania nieważnej encji w obecnym ECS oraz ochrona przed recyklingiem identyfikatorów.
+- Current resource inventory and destructors of Sound, Music, PhysicTexture, and ECS base classes.
+- Every texture creation and replacement path, including terrain rebuilding and failed loading.
+- Lifetime of WeaponManager resources borrowed by Projectile.
+- Construction and initialization of FocusPoint and cleanup of its entity.
+- Callbacks executed during DestroyBody and rules for modifying the listener registry during dispatch.
+- Every address passed to userData, especially temporary arguments and possible object moves.
+- How to identify an invalid entity in the current ECS and protect against identifier reuse.
 
-## Kryteria przyjęcia kontraktu
+## Contract Acceptance Criteria
 
-- Dla każdego zasobu wskazany jest właściciel i miejsce zwolnienia; obserwatorzy nie wykonują delete ani zwolnienia pożyczonego uchwytu.
-- Sprzątanie obejmuje usunięcie podczas gry, normalne zamknięcie i błąd częściowej inicjalizacji.
-- Powtórne sprzątanie i wielokrotne zgłoszenie usunięcia nie powodują podwójnego zwolnienia.
-- Przed zniszczeniem zależności nie pozostają obiekty, komponenty ani callbacki, które z nich korzystają.
-- Powtarzane cykle tworzenia i usuwania wracają do oczekiwanej liczby encji, ciał, subskrypcji i zasobów. Ocena pamięci uwzględnia pule i cache bibliotek, a nie wymaga identycznego zużycia pamięci procesu.
+- Every resource has an identified owner and release location; observers do not delete or release borrowed handles.
+- Cleanup covers removal during gameplay, normal shutdown, and partial initialization failure.
+- Repeated cleanup and repeated removal requests do not cause double release.
+- No objects, components, or callbacks using a dependency remain when it is destroyed.
+- Repeated creation and removal cycles restore the expected entity, body, subscription, and resource counts. Memory assessment accounts for library pools and caches rather than requiring identical process memory usage.

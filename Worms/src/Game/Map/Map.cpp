@@ -12,12 +12,11 @@
 #include <memory>
 #include <algorithm>
 
-Map::Map(b2World* physicsWorld) : physicsWorld(physicsWorld) {}
-
-void Map::Initialise(SDL_Renderer* renderer, World* world)
+void Map::Initialise(const SceneContext& context)
 {
-    if (!physicsWorld) throw std::invalid_argument("Map requires a physics world");
-    GameObject::Initialise(renderer, world);
+    ColliderFactory::Get().RequirePhysicsWorld(context.physics);
+    GameObject::Initialise(context);
+    physicsWorld = &context.physics;
     try
     {
         physicsInfo.id = objectId;

@@ -104,20 +104,24 @@ void GameScene::Initialize()
         world->RegisterSystem<PhysicsSynchronizer>();
         world->RegisterSystem<TargetSystem>(*world);
         world->RegisterSystem<ParticleUpdater>();
+        physicsWorld = std::make_unique<b2World>(b2Vec2(0, -9.811f));
+        context = std::make_unique<SceneContext>(renderer, *world, *physicsWorld, *this);
         auto camera = std::make_unique<Camera>();
         auto cameraPtr = camera.get();
         QueueAdd(std::move(camera));
         world->RegisterSystem<SpriteRenderer>(renderer, *cameraPtr);
 
-        physicsWorld = std::make_unique<b2World>(b2Vec2(0, -9.811f));
         setUpDebugDraw(*cameraPtr);
         ColliderFactory::Get().Init(physicsWorld.get());
-        weaponManager = std::make_unique<WeaponManager>(renderer, *cameraPtr, *this);
-        wormManager = std::make_unique<WormManager>(renderer, world.get(), physicsWorld.get(),
-                                                    *cameraPtr, *weaponManager->GetWeapon(), this);
+        auto weapon = std::make_unique<Weapon>(*cameraPtr);
+        auto* weaponPtr = weapon.get();
+        QueueAdd(std::move(weapon));
+        weaponManager = std::make_unique<WeaponManager>(*renderer, *weaponPtr);
+        wormManager = std::make_unique<WormManager>(*context, *cameraPtr, *weaponPtr);
+        wormManager->Initialise();
         wormManager->CreateTeam(4);
         wormManager->CreateTeam(4);
-        QueueAdd(std::make_unique<Map>(physicsWorld.get()));
+        QueueAdd(std::make_unique<Map>());
 
         // Keep the camera's update/render order while owning it throughout initialization.
         auto cameraIt =
@@ -162,32 +166,52 @@ void GameScene::registerComponents()
     world->RegisterComponent<Particle>();
 }
 
+const SceneContext& GameScene::Context() const
+{
+    if (!ownsRuntime || cleaningUp || !context)
+        throw std::logic_error("Scene context is unavailable");
+    return *context;
+}
+
 void GameScene::ValidateObject(const GameObject& object) const
 {
     if (!ownsRuntime || cleaningUp)
         throw std::logic_error("Scene is not accepting objects");
-    if (object.scene && object.scene != this)
+    if (object.context && &object.context->objects != this)
         throw std::invalid_argument("Object belongs to another scene");
     if (object.HasEntity() && object.world != world.get())
         throw std::invalid_argument("Object belongs to another ECS world");
+    if (object.context &&
+        (&object.context->physics != physicsWorld.get() || object.context->renderer != renderer))
+        throw std::invalid_argument("Object uses different scene services");
 }
 
 void GameScene::QueueAdd(std::unique_ptr<GameObject> object)
 {
     if (!object)
         throw std::invalid_argument("Cannot add a null object");
-    ValidateObject(*object);
-    if (object->HasEntity())
-        throw std::invalid_argument("QueueAdd requires an uninitialized object");
-    auto* pointer = object.get();
+    try
+    {
+        ValidateObject(*object);
+        if (object->HasEntity())
+            throw std::invalid_argument("QueueAdd requires an uninitialized object");
+    }
+    catch (...)
+    {
+        TryCleanup("Rejected queued object cleanup", [&object] { object->CleanUp(); });
+        throw;
+    }
     pendingAdds.emplace_back(std::move(object));
-    pointer->scene = this;
 }
 
 GameObject& GameScene::AddObject(std::unique_ptr<GameObject> object)
 {
     if (processingFrame || initializingObject)
+    {
+        if (object)
+            TryCleanup("Rejected immediate object cleanup", [&object] { object->CleanUp(); });
         throw std::logic_error("Use QueueAdd during frame processing or initialization");
+    }
     return ActivateObject(std::move(object));
 }
 
@@ -195,15 +219,22 @@ GameObject& GameScene::ActivateObject(std::unique_ptr<GameObject> object)
 {
     if (!object)
         throw std::invalid_argument("Cannot add a null object");
-    ValidateObject(*object);
-    object->scene = this;
+    try
+    {
+        ValidateObject(*object);
+    }
+    catch (...)
+    {
+        TryCleanup("Rejected object cleanup", [&object] { object->CleanUp(); });
+        throw;
+    }
     initializingObject = object.get();
     try
     {
         if (activeObjects.size() == activeObjects.capacity())
             activeObjects.reserve(std::max(activeObjects.size() + 1, activeObjects.capacity() * 2));
         if (!object->HasEntity())
-            object->Initialise(renderer, world.get());
+            object->Initialise(*context);
         auto& result = *object;
         activeObjects.emplace_back(std::move(object));
         initializingObject = nullptr;
@@ -378,6 +409,7 @@ void GameScene::CleanUp() noexcept
     b2DebugDraw.reset();
     failedStartupObject.reset();
     ColliderFactory::Get().Init(nullptr);
+    context.reset();
     physicsWorld.reset();
     world.reset();
 
