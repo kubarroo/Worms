@@ -16,6 +16,8 @@ public:
     ResourceManager(ResourceManager&&) = delete;
     ResourceManager& operator=(ResourceManager&&) = delete;
 
+    // Shared read-only asset: callers must not update pixels or persistent texture state
+    // (color/alpha modulation, blend/scale mode). Mutable instances need private owners.
     SDL_Texture* GetTexture(const std::filesystem::path& path);
     Sound& GetSound(const std::filesystem::path& path);
     Music& GetMusic(const std::filesystem::path& path);

@@ -14,6 +14,7 @@
 #include "Game/Weapon/WeaponManager.h"
 #include <SDL_mixer.h>
 #include <box2d/b2_circle_shape.h>
+#include <box2d/b2_chain_shape.h>
 #include <box2d/b2_contact_manager.h>
 #include <filesystem>
 #include <gtest/gtest.h>
@@ -106,6 +107,7 @@ struct GameTestAccess
 
 struct MapTestAccess
 {
+    static SDL_Texture* Texture(const Map& map) { return map.mapTexture.get(); }
     static SDL_Surface* Surface(Map& map) { return map.physTex->surface.get(); }
     static bool HasResources(const Map& map)
     {
@@ -151,6 +153,14 @@ struct MapTestAccess
         try { map.Update(); }
         catch (...) { map.renderer = renderer; throw; }
         map.renderer = renderer;
+    }
+};
+
+struct WormManagerTestAccess
+{
+    static WormTeam& Team(WormManager& manager, std::size_t index)
+    {
+        return *manager.teams.at(index);
     }
 };
 
@@ -257,6 +267,51 @@ std::size_t CountOpaquePixels(SDL_Surface* surface)
             if (a) ++count;
         }
     return count;
+}
+
+std::vector<Uint8> SnapshotPixels(SDL_Surface* surface)
+{
+    Sdl::SurfaceLock lock(surface);
+    std::vector<Uint8> pixels;
+    const auto rowSize = surface->w * surface->format->BytesPerPixel;
+    pixels.reserve(static_cast<std::size_t>(rowSize) * surface->h);
+    for (int y = 0; y < surface->h; ++y)
+    {
+        const auto* row = static_cast<const Uint8*>(surface->pixels) + y * surface->pitch;
+        pixels.insert(pixels.end(), row, row + rowSize);
+    }
+    return pixels;
+}
+
+std::vector<std::vector<std::pair<float, float>>> SnapshotChains(const b2Body& body)
+{
+    std::vector<std::vector<std::pair<float, float>>> chains;
+    for (const auto* fixture = body.GetFixtureList(); fixture; fixture = fixture->GetNext())
+    {
+        const auto* shape = fixture->GetShape();
+        if (shape->GetType() != b2Shape::e_chain)
+            throw std::logic_error("Terrain fixture is not a chain");
+        const auto& chain = static_cast<const b2ChainShape&>(*shape);
+        auto& points = chains.emplace_back();
+        for (int32 index = 0; index < chain.m_count; ++index)
+            points.emplace_back(chain.m_vertices[index].x, chain.m_vertices[index].y);
+    }
+    return chains;
+}
+
+SDL_Point FirstOpaquePixel(SDL_Surface* surface)
+{
+    Sdl::SurfaceLock lock(surface);
+    for (int y = 0; y < surface->h; ++y)
+        for (int x = 0; x < surface->w; ++x)
+        {
+            const auto* row = reinterpret_cast<const Uint32*>(
+                static_cast<const Uint8*>(surface->pixels) + y * surface->pitch);
+            Uint8 r, g, b, a;
+            SDL_GetRGBA(row[x], surface->format, &r, &g, &b, &a);
+            if (a) return {x, y};
+        }
+    return {-1, -1};
 }
 
 class ScopedDriverHint
@@ -2077,6 +2132,107 @@ TEST_F(GameLifetime, DuplicateDeletionRequestsCleanAndDestroyAnObjectOnlyOnce)
     EXPECT_FALSE(game.Registry().IsAlive(*handle));
     EXPECT_TRUE(game.PendingRemovalCount() == 0);
     EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+}
+
+TEST_F(GameLifetime, MapsOwnIndependentPixelsTexturesAndColliders)
+{
+    auto& first = static_cast<Map&>(game.AddObject(std::make_unique<Map>()));
+    auto& second = static_cast<Map&>(game.AddObject(std::make_unique<Map>()));
+    auto* firstSurface = MapTestAccess::Surface(first);
+    auto* secondSurface = MapTestAccess::Surface(second);
+    ASSERT_EQ(firstSurface->format->BytesPerPixel, 4);
+    ASSERT_EQ(secondSurface->format->BytesPerPixel, 4);
+    EXPECT_NE(firstSurface, secondSurface);
+    EXPECT_NE(firstSurface->pixels, secondSurface->pixels);
+    EXPECT_NE(MapTestAccess::Texture(first), MapTestAccess::Texture(second));
+    auto* sourceTexture = game.Assets().GetTexture("map.png");
+    EXPECT_NE(MapTestAccess::Texture(first), sourceTexture);
+    EXPECT_NE(MapTestAccess::Texture(second), sourceTexture);
+    const auto originalPixels = SnapshotPixels(secondSurface);
+    EXPECT_EQ(SnapshotPixels(firstSurface), originalPixels);
+    auto* secondTexture = MapTestAccess::Texture(second);
+    auto* secondBody = game.Registry().GetComponent<RigidBody>(second.GetId()).body;
+    ASSERT_NE(secondBody, nullptr);
+    const auto originalChains = SnapshotChains(*secondBody);
+    ASSERT_FALSE(originalChains.empty());
+    const auto secondPosition = secondBody->GetPosition();
+
+    const auto pixel = FirstOpaquePixel(firstSurface);
+    ASSERT_GE(pixel.x, 0);
+    const auto pos = game.Registry().GetComponent<Position>(first.GetId());
+    const Position impact{pos.x + (pixel.x - firstSurface->w / 2) / 100.f,
+                          pos.y - (pixel.y - firstSurface->h / 2) / 100.f};
+    const auto before = CountOpaquePixels(firstSurface);
+    MapTestAccess::RequestDeformation(first, impact, 0.2f);
+    first.Update();
+    EXPECT_LT(CountOpaquePixels(firstSurface), before);
+    EXPECT_EQ(SnapshotPixels(secondSurface), originalPixels);
+    EXPECT_EQ(MapTestAccess::Texture(second), secondTexture);
+    EXPECT_EQ(game.Registry().GetComponent<RigidBody>(second.GetId()).body, secondBody);
+    EXPECT_EQ(SnapshotChains(*secondBody), originalChains);
+    EXPECT_FLOAT_EQ(secondBody->GetPosition().x, secondPosition.x);
+    EXPECT_FLOAT_EQ(secondBody->GetPosition().y, secondPosition.y);
+
+    first.CleanUp();
+    EXPECT_EQ(SDL_QueryTexture(secondTexture, nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(SDL_QueryTexture(sourceTexture, nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(SnapshotPixels(secondSurface), originalPixels);
+    EXPECT_EQ(SnapshotChains(*secondBody), originalChains);
+    first.Initialise(game.Context());
+    EXPECT_EQ(SnapshotPixels(MapTestAccess::Surface(first)), originalPixels);
+    EXPECT_NE(MapTestAccess::Texture(first), secondTexture);
+    EXPECT_EQ(game.Assets().GetTexture("map.png"), sourceTexture);
+    first.CleanUp();
+    second.CleanUp();
+    EXPECT_EQ(MapTestAccess::OwnedResources(first), 0);
+    EXPECT_EQ(MapTestAccess::OwnedResources(second), 0);
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+    EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+}
+
+TEST_F(GameLifetime, GeneratedTeamTexturesOutliveWormsAndRemainIndependent)
+{
+    CreateManager();
+    manager->CreateTeam(2);
+    manager->CreateTeam(1);
+    auto& firstTeam = WormManagerTestAccess::Team(*manager, 0);
+    auto& secondTeam = WormManagerTestAccess::Team(*manager, 1);
+    auto* firstTexture = firstTeam.GetHealthBarTexture();
+    auto* secondTexture = secondTeam.GetHealthBarTexture();
+    ASSERT_NE(firstTexture, nullptr);
+    ASSERT_NE(secondTexture, nullptr);
+    EXPECT_NE(firstTexture, secondTexture);
+    Uint8 red, green, blue, alpha;
+    SDL_BlendMode blend;
+    ASSERT_EQ(SDL_GetTextureColorMod(secondTexture, &red, &green, &blue), 0);
+    ASSERT_EQ(SDL_GetTextureAlphaMod(secondTexture, &alpha), 0);
+    ASSERT_EQ(SDL_GetTextureBlendMode(secondTexture, &blend), 0);
+    ASSERT_EQ(SDL_SetTextureColorMod(firstTexture, 20, 40, 60), 0);
+    ASSERT_EQ(SDL_SetTextureAlphaMod(firstTexture, 100), 0);
+    ASSERT_EQ(SDL_SetTextureBlendMode(firstTexture, SDL_BLENDMODE_ADD), 0);
+    Uint8 actualRed, actualGreen, actualBlue, actualAlpha;
+    SDL_BlendMode actualBlend;
+    ASSERT_EQ(SDL_GetTextureColorMod(secondTexture, &actualRed, &actualGreen, &actualBlue), 0);
+    ASSERT_EQ(SDL_GetTextureAlphaMod(secondTexture, &actualAlpha), 0);
+    ASSERT_EQ(SDL_GetTextureBlendMode(secondTexture, &actualBlend), 0);
+    EXPECT_EQ(actualRed, red);
+    EXPECT_EQ(actualGreen, green);
+    EXPECT_EQ(actualBlue, blue);
+    EXPECT_EQ(actualAlpha, alpha);
+    EXPECT_EQ(actualBlend, blend);
+
+    KillActiveWorm();
+    EXPECT_EQ(firstTeam.Size(), 1);
+    EXPECT_EQ(firstTeam.GetHealthBarTexture(), firstTexture);
+    EXPECT_EQ(SDL_QueryTexture(firstTexture, nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_NO_THROW(firstTeam.RenderHealthBars());
+    manager->DeleteTeam(&firstTeam);
+    EXPECT_EQ(secondTeam.GetHealthBarTexture(), secondTexture);
+    EXPECT_EQ(SDL_QueryTexture(secondTexture, nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_NO_THROW(secondTeam.RenderHealthBars());
+    manager->CleanUp();
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+    EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
 }
 
 TEST_F(GameLifetime, RepeatedTerrainDeformationReplacesResourcesWithoutGrowingCounts)

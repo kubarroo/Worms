@@ -41,6 +41,7 @@ private:
 
     Position bulltetPos;
     PhysicsInfo physicsInfo;
+    // Private per-map pixels and texture; Sprite only borrows mapTexture.
     std::optional<PhysicTexture> physTex;
     Sdl::TexturePtr mapTexture;
     float destructionRadius = 0;

@@ -29,6 +29,8 @@ public:
 
 private:
     void ActiveWormCheck();
+    // Private generated texture, shared only by this team's health bars.
+    // Declared before worms so destruction releases borrowers first.
     TexturePtr healthBarTexture;
     std::vector<std::unique_ptr<Worm>> worms;
     std::vector<Worm*> wormsToDelete;

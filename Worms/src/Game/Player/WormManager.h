@@ -32,6 +32,7 @@ public:
     ~WormManager() = default;
 
 private:
+    friend struct WormManagerTestAccess;
     void ActiveTeamCheck();
     void ChangeTeam();
     void ChangeActiveWorm();

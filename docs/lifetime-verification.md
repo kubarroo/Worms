@@ -35,6 +35,12 @@ continued death-sound playback after team deletion, and projectile assets surviv
 WeaponManager destruction. These are not global SDL allocation counters or proof
 that no leaks exist.
 
+Mutable-resource tests compare full terrain pixel snapshots and Box2D chain geometry
+for two maps, deform and clean one, and verify the other and a reinitialized map.
+Generated team textures are tested for distinct identity and independent color,
+alpha, and blend state; surviving health bars render after worm/team removal.
+Texture destruction follows RAII; tests never query a freed SDL pointer to prove release.
+
 ## Running Tests
 
 After building `worms_tests`:

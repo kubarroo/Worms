@@ -1,6 +1,6 @@
 # Phase 3 Resource Ownership Contract
 
-This is the current contract for phase 3, steps 1 through 3. The older
+This is the current contract for phase 3, steps 1 through 4. The older
 `ownership-and-cleanup.md` is a historical phase-1 proposal. Scene ownership is
 described in `Architecture.md`.
 
@@ -90,3 +90,22 @@ or hot reload is allowed while borrowers exist. Borrowed pointers remain valid u
 cache cleanup; recreation of the platform invalidates all old handles. A texture cache
 must never be reused with a different renderer. This lifetime rule avoids requiring
 shared_ptr for every asset.
+
+## Mutable Resources
+
+Cached textures are shared read-only assets. Borrowers must not write pixels or
+persistently change color/alpha modulation, blend mode, or scale mode. SDL exposes
+mutable native handles, so this is an API contract rather than const enforcement.
+Any future per-instance rendering state must be applied and restored by the renderer,
+or use a privately owned texture. Current gameplay does not modify cached texture state.
+
+Every Map independently loads source pixels, owns its surface and current texture,
+and rebuilds only its own physics body. Source-image caching is not introduced.
+Deforming or destroying one map must leave other maps and the source asset unchanged;
+reinitialization loads the original terrain again.
+
+WormTeam exclusively owns its generated health-bar texture. All its worms' health bars
+borrow that texture. Different teams have different textures. Removing a worm leaves
+the team texture alive. CleanUp removes borrowers but retains the texture for team
+restart; destroying the team releases it. Member declaration order also destroys
+worms before the texture if destruction occurs without an explicit CleanUp call.
