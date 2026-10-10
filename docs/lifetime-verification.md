@@ -2,6 +2,10 @@
 
 ## Automated Coverage
 
+`ApplicationTests/TestResourceManager.cpp` verifies cache reuse, normalized and
+absolute paths, missing-file diagnostics and retry, platform restart, cache retention
+across scene restart, renderer mismatch rejection, and shutdown with cached audio.
+
 Tests in `ApplicationTests/TestGameLifetime.cpp` use SDL `dummy` drivers and the `software` renderer. They verify logic and resources without an interactive gameplay window.
 
 | Scenario | Verification |

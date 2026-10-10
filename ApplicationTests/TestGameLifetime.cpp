@@ -3,6 +3,7 @@
 #include "Core/ParticleSystem.h"
 #include "Core/Physics/ColliderFactory.h"
 #include "Core/Time.h"
+#include "Core/ResourceManager.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Game.h"
 #include "Game/GameScene.h"
@@ -281,6 +282,7 @@ public:
     World& Registry() { return GameTestAccess::Registry(*this); }
     b2World& Physics() { return GameTestAccess::Physics(*this); }
     SDL_Renderer* Renderer() { return renderer.get(); }
+    ResourceManager& Assets() { return Resources(); }
     GameScene& Scene() { return GameTestAccess::Scene(*this); }
     const SceneContext& Context()
     {
@@ -288,11 +290,11 @@ public:
     }
     SceneContext ContextWith(World& world)
     {
-        return {Renderer(), world, Physics(), Scene(), Context().colliders, Context().contacts};
+        return {Renderer(), world, Physics(), Scene(), Context().colliders, Context().contacts, Context().resources};
     }
     SceneContext ContextWith(SDL_Renderer* renderer)
     {
-        return {renderer, Registry(), Physics(), Scene(), Context().colliders, Context().contacts};
+        return {renderer, Registry(), Physics(), Scene(), Context().colliders, Context().contacts, Context().resources};
     }
     auto Objects() const { return GameTestAccess::Objects(*this); }
     auto PendingAddCount() const { return GameTestAccess::PendingAddCount(*this); }
@@ -452,7 +454,7 @@ TEST_F(GameLifetime, SecondSceneOwnsIndependentPhysicsServicesAndCleanup)
 {
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     {
-        GameScene second(game.Renderer());
+        GameScene second(game.Renderer(), game.Assets());
         ASSERT_NO_THROW(second.Initialize());
         EXPECT_NE(&second.Context().physics, &game.Context().physics);
         EXPECT_NE(&second.Context().colliders, &game.Context().colliders);
@@ -479,7 +481,7 @@ TEST_F(GameLifetime, FailedSecondSceneStartupDoesNotInvalidateRunningPhysicsServ
 {
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     const auto active = GameTestAccess::ActiveWorm(game);
-    GameScene second(game.Renderer());
+    GameScene second(game.Renderer(), game.Assets());
     SceneAssetsWithout assets("powerBar.png");
     {
         ScopedWorkingDirectory directory(assets.Directory());
@@ -552,7 +554,7 @@ TEST_F(GameLifetime, SceneDestructionReleasesGameplayButKeepsPlatformAlive)
     {
         SCOPED_TRACE(cycle);
         {
-            GameScene scene(game.Renderer());
+            GameScene scene(game.Renderer(), game.Assets());
             scene.Initialize();
             EXPECT_EQ(GameTestAccess::SubscriptionCount(scene), subscriptions);
             EXPECT_THROW(scene.Initialize(), std::logic_error);
@@ -574,7 +576,7 @@ TEST_F(GameLifetime, FailedSceneInitializationRollsBackAndCanBeRetried)
 {
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     GameTestAccess::ResetScene(game);
-    GameScene scene(game.Renderer());
+    GameScene scene(game.Renderer(), game.Assets());
     {
         // The project root has no gameplay assets, so initialization fails after physics setup.
         ScopedWorkingDirectory directory(std::filesystem::current_path().parent_path());
@@ -808,7 +810,7 @@ TEST_F(GameLifetime, PhysicsObjectsRejectForeignWorldBeforeAllocatingResources)
     CreateTestTeam();
     b2World foreignPhysics({0, 0});
     const SceneContext foreign{game.Renderer(), game.Registry(),          foreignPhysics,
-                               game.Scene(),    game.Context().colliders, game.Context().contacts};
+                               game.Scene(),    game.Context().colliders, game.Context().contacts, game.Context().resources};
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     Worm worm(*camera, team->GetHealthBarTexture(), {3.f, 4.f});
     Projectile projectile(0, 2, 0, 0);
@@ -842,7 +844,7 @@ TEST_F(GameLifetime, PhysicsWorldValidationPrecedesEntityAllocation)
     b2World foreignPhysics({0, 0});
     const SceneContext foreign{game.Renderer(),          *exhausted,
                                foreignPhysics,           game.Scene(),
-                               game.Context().colliders, game.Context().contacts};
+                               game.Context().colliders, game.Context().contacts, game.Context().resources};
     Worm worm(*camera, nullptr, {0.f, 2.f});
     Projectile projectile(0, 2, 0, 0);
     Map map;
@@ -858,7 +860,7 @@ TEST_F(GameLifetime, PhysicsObjectsRejectMismatchedContactManagerBeforeInitializ
 {
     ContactManager foreignContacts;
     const SceneContext foreign{game.Renderer(), game.Registry(),          game.Physics(),
-                               game.Scene(),    game.Context().colliders, foreignContacts};
+                               game.Scene(),    game.Context().colliders, foreignContacts, game.Context().resources};
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     Worm worm(*camera, nullptr, {0.f, 2.f});
     Projectile projectile(0, 2, 0, 0);
@@ -985,10 +987,10 @@ TEST_F(GameLifetime, ObjectContextIsCopiedAndUnavailableOutsideItsLifetime)
 
 TEST_F(GameLifetime, SceneRejectsInitializedObjectsWithForeignCommands)
 {
-    GameScene foreign(game.Renderer());
+    GameScene foreign(game.Renderer(), game.Assets());
     auto object = std::make_unique<GameObject>();
     object->Initialise(SceneContext{game.Renderer(), game.Registry(), game.Physics(), foreign,
-                                    game.Context().colliders, game.Context().contacts});
+                                    game.Context().colliders, game.Context().contacts, game.Assets()});
     EXPECT_THROW(game.AddObject(std::move(object)), std::invalid_argument);
     EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
     EXPECT_EQ(game.PendingAddCount(), 0);
@@ -1000,10 +1002,31 @@ TEST_F(GameLifetime, SceneRejectsInitializedObjectsWithDifferentPhysicsAndCleans
     b2World foreignPhysics({0, 0});
     auto object = std::make_unique<GameObject>();
     object->Initialise(SceneContext{game.Renderer(), game.Registry(), foreignPhysics, game.Scene(),
-                                    game.Context().colliders, game.Context().contacts});
+                                    game.Context().colliders, game.Context().contacts, game.Assets()});
     EXPECT_THROW(game.AddObject(std::move(object)), std::invalid_argument);
     EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
     EXPECT_EQ(game.PendingAddCount(), 0);
+}
+
+TEST_F(GameLifetime, SceneRejectsDifferentResourceManagerOnSameRendererAndCleansObject)
+{
+    ResourceManager foreignResources(game.Renderer(), game.Assets().AssetRoot());
+    const auto active = game.Objects().size();
+    const auto pending = game.PendingAddCount();
+    const auto stats = std::make_shared<QueueProbeStats>();
+    auto object = std::make_unique<QueueProbe>(stats);
+    auto foreignContext = game.Context();
+    const SceneContext context{foreignContext.renderer, foreignContext.world,
+                               foreignContext.physics, foreignContext.objects,
+                               foreignContext.colliders, foreignContext.contacts, foreignResources};
+    object->Initialise(context);
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities - 1);
+    EXPECT_THROW(game.AddObject(std::move(object)), std::invalid_argument);
+    EXPECT_EQ(stats->cleaned, 1);
+    EXPECT_EQ(stats->destroyed, 1);
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+    EXPECT_EQ(game.Objects().size(), active);
+    EXPECT_EQ(game.PendingAddCount(), pending);
 }
 
 TEST_F(GameLifetime, QueueRejectionCleansAnAlreadyInitializedObject)
@@ -1129,7 +1152,7 @@ TEST_F(GameLifetime, QueueRejectsNullObjectsAndRemovalOfObjectsOutsideScene)
     EXPECT_THROW(game.QueueAdd(nullptr), std::invalid_argument);
     EXPECT_THROW(game.AddObject(nullptr), std::invalid_argument);
     EXPECT_THROW(game.RequestDestroy(foreign), std::invalid_argument);
-    GameScene inactive(game.Renderer());
+    GameScene inactive(game.Renderer(), game.Assets());
     EXPECT_THROW(inactive.QueueAdd(std::make_unique<GameObject>()), std::logic_error);
     EXPECT_THROW(inactive.RequestDestroy(*camera), std::logic_error);
     EXPECT_EQ(game.Objects().size(), active);
@@ -1236,7 +1259,7 @@ TEST_F(GameLifetime, CleanupExceptionsDoNotStopSceneDestructionOrNextSceneStartu
     EXPECT_FALSE(GameTestAccess::TakePendingException(game));
     EXPECT_EQ(SDL_RenderClear(game.Renderer()), 0);
 
-    GameScene next(game.Renderer());
+    GameScene next(game.Renderer(), game.Assets());
     ASSERT_NO_THROW(next.Initialize());
     EXPECT_EQ(GameTestAccess::Registry(next).GetAmountOfAvailableEntities(), initialEntities);
     EXPECT_EQ(GameTestAccess::Physics(next).GetBodyCount(), initialBodies);
@@ -1271,7 +1294,7 @@ TEST_F(GameLifetime, MissingWeaponPowerBarRollsBackWithoutDanglingManagerReferen
 {
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     GameTestAccess::ResetScene(game);
-    GameScene scene(game.Renderer());
+    GameScene scene(game.Renderer(), game.Assets());
     SceneAssetsWithout assets("powerBar.png");
     {
         ScopedWorkingDirectory directory(assets.Directory());
@@ -1303,7 +1326,7 @@ TEST_F(GameLifetime, MissingMusicRollsBackFullyConstructedGameplayAndAllowsRetry
 {
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     GameTestAccess::ResetScene(game);
-    GameScene scene(game.Renderer());
+    GameScene scene(game.Renderer(), game.Assets());
     SceneAssetsWithout assets("Rick_Roll.ogg");
     {
         ScopedWorkingDirectory directory(assets.Directory());

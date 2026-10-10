@@ -4,7 +4,11 @@
 Music::Music(const std::string& fileName)
 {
     music = Mix_LoadMUS(fileName.c_str());
-    SDL_CHECK(music);
+    if (!music)
+    {
+        const auto message = "Could not load music '" + fileName + "': " + Mix_GetError();
+        throw SDL_Exception(__LINE__, __FILE__, message.c_str());
+    }
 }
 
 void Music::Play(unsigned int times)

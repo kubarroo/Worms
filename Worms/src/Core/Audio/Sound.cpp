@@ -1,11 +1,14 @@
 #include "Sound.h"
-#include "Terminal/Terminal.h"
+#include "ExceptionHandling/SDL_Exception.h"
 
 Sound::Sound(const std::string& fileName)
 {
     sound = Mix_LoadWAV(fileName.c_str());
-    if (sound == NULL)
-        Terminal::Get().Log("Coudn't load \"" + fileName + "\" as sound obj", LogLevel::ERROR);
+    if (!sound)
+    {
+        const auto message = "Could not load sound '" + fileName + "': " + Mix_GetError();
+        throw SDL_Exception(__LINE__, __FILE__, message.c_str());
+    }
 }
 
 void Sound::Play(unsigned int times)

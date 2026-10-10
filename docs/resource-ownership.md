@@ -1,6 +1,6 @@
 # Phase 3 Resource Ownership Contract
 
-This is the current contract for phase 3, step 1. The older
+This is the current contract for phase 3, steps 1 and 2. The older
 `ownership-and-cleanup.md` is a historical phase-1 proposal. Scene ownership is
 described in `Architecture.md`.
 
@@ -23,6 +23,7 @@ described in `Architecture.md`.
 | --- | --- | --- |
 | Window and renderer | App: WindowPtr and RendererPtr | GameScene, SceneContext, rendering objects, ImGui |
 | Audio device and SDL/ImGui initialization | App | Scene and audio wrappers |
+| Cached textures, sounds and music | App through ResourceManager | SceneContext and asset callers |
 | Weapon/projectile textures and weapon sounds | WeaponManager | Weapon, Projectile, Sprite components |
 | Charge-bar texture | Weapon | Its rendering code |
 | Worm sprite and jump sound | Worm | Its Sprite component and playback |
@@ -41,7 +42,7 @@ not a shared mutable cache entry.
 1. Game stops music and all audio channels without closing the device.
 2. Game destroys its scene, including private resources and current scene-owned assets.
    GameScene also stops playback for standalone scene cleanup and startup rollback.
-3. After ResourceManager is introduced, release its cache here, after all borrowers.
+3. App releases ResourceManager and its cache after all scene borrowers.
 4. App shuts down ImGui backends and its context.
 5. App closes the audio device.
 6. App resets the renderer, then the window.
@@ -53,12 +54,28 @@ Standalone scenes borrow a live platform and do not close it. Their current clea
 stops all playback on the shared mixer, so audio isolation between simultaneous scenes
 is not provided by this contract.
 
-## ResourceManager Contract For Subsequent Steps
+## ResourceManager
 
-App will own a ResourceManager tied to its renderer. Shared immutable textures,
-sounds, and music move from the owners above into that manager; mutable terrain and
-generated team textures retain their private owners. Scenes borrow the manager through
-SceneContext. There is no ResourceManager implementation in step 1.
+App owns a ResourceManager tied to its renderer, created after renderer/audio
+initialization and before the scene. Scenes borrow it through SceneContext and must
+use the same renderer. Headless contexts may use a manager with a null renderer;
+texture loading then throws. Audio loading requires an open mixer device.
+
+GetTexture, GetSound and GetMusic load on first access and return borrowed assets.
+Failed loads throw SDL_Exception with the filename and library error; no failed entry
+is cached. Sound and Music constructors also report errors this way.
+
+App::SetAssetRoot configures an explicit base directory before initialization. The
+default is the working directory at initialization for existing launch workflows.
+The manager stores an absolute base directory, so later working-directory changes
+do not affect lookup. Paths are normalized with std::filesystem::path::lexically_normal
+without filesystem queries on cache lookup. Relative, absolute and normalized aliases
+share an entry; symbolic-link aliases are not resolved. Cache keys use filesystem
+path equality; arbitrary case aliases are not folded, even on Windows.
+
+Existing gameplay loaders remain in their current owners in step 2. Migrating them
+to the cache is step 3. Mutable terrain and generated team textures retain private
+owners. Source images can be shared, but mutable instances must remain independent.
 
 The initial cache keeps assets until full application cleanup. No per-entry eviction
 or hot reload is allowed while borrowers exist. Borrowed pointers remain valid until

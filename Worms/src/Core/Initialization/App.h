@@ -3,6 +3,9 @@
 #include <imgui.h>
 #include <string>
 #include "Core/SDLHandles.h"
+#include <filesystem>
+
+class ResourceManager;
 
 class App
 {
@@ -19,6 +22,8 @@ public:
     void PostRender();
     void PreRender();
     virtual void Clean() noexcept;
+    // Configuration for the next platform initialization; never changes a live cache.
+    void SetAssetRoot(std::filesystem::path root);
 
     inline bool IsRunning() const
     {
@@ -32,9 +37,12 @@ protected:
     Sdl::RendererPtr renderer;
     bool audioOpened = false;
     void StopAudioPlayback() noexcept;
+    ResourceManager& Resources() const;
     bool ShouldRenderColliders() const { return toggleColliders; }
 
 private:
+    std::filesystem::path assetRoot = ".";
+    std::unique_ptr<ResourceManager> resources;
     void InitSDL(const std::string& title, const int width, const int height);
     void InitImGui();
     ImGuiIO* io = nullptr;

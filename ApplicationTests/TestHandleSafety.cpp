@@ -1,5 +1,6 @@
 #include "Core/Camera/Camera.h"
 #include "Core/GameObject.h"
+#include "Core/ResourceManager.h"
 #include "Core/Physics/ColliderFactory.h"
 #include "Game/Systems.h"
 #include <box2d/b2_world.h>
@@ -50,7 +51,8 @@ TEST(HandleSafety, EntityZeroIsValidAndCleanupCanBeRepeated)
     HeadlessCommands commands;
     ContactManager contacts;
     ColliderFactory colliders(physics, contacts);
-    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts};
+    ResourceManager resources(nullptr, ".");
+    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts, resources};
     world->RegisterComponent<Position>();
     GameObject object;
     EXPECT_FALSE(object.HasEntity());
@@ -76,7 +78,8 @@ TEST(HandleSafety, FocusPointCanHaveNoTargetOrTargetEntityZero)
     HeadlessCommands commands;
     ContactManager contacts;
     ColliderFactory colliders(physics, contacts);
-    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts};
+    ResourceManager resources(nullptr, ".");
+    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts, resources};
     world->RegisterComponent<Position>();
     const auto target = world->CreateEntity();
     world->AddComponent<Position>(target, {3, 4});
@@ -104,7 +107,8 @@ TEST(HandleSafety, CameraReadsItsPositionAfterComponentCompaction)
     HeadlessCommands commands;
     ContactManager contacts;
     ColliderFactory colliders(physics, contacts);
-    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts};
+    ResourceManager resources(nullptr, ".");
+    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts, resources};
     world->RegisterComponent<Position>();
     const auto other = world->CreateEntity();
     world->AddComponent<Position>(other, {9, 9});
@@ -189,7 +193,8 @@ TEST(HandleSafety, ObserversClearMissingPositionAndDoNotResumeAfterItIsAddedBack
     HeadlessCommands commands;
     ContactManager contacts;
     ColliderFactory colliders(physics, contacts);
-    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts};
+    ResourceManager resources(nullptr, ".");
+    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts, resources};
     world->RegisterComponent<Position>();
     world->RegisterComponent<Follow>();
     world->RegisterSystem<TargetSystem>(*world);
@@ -223,7 +228,8 @@ TEST(HandleSafety, FocusPointResolvesPositionAfterAnotherComponentIsCompacted)
     HeadlessCommands commands;
     ContactManager contacts;
     ColliderFactory colliders(physics, contacts);
-    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts};
+    ResourceManager resources(nullptr, ".");
+    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts, resources};
     world->RegisterComponent<Position>();
     const auto other = world->CreateEntity();
     world->AddComponent<Position>(other, {9, 10});

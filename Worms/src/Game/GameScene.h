@@ -17,7 +17,7 @@ class GameObject;
 class GameScene : public ObjectCommands
 {
 public:
-    explicit GameScene(SDL_Renderer* renderer);
+    GameScene(SDL_Renderer* renderer, ResourceManager& resources);
     ~GameScene() override;
     GameScene(const GameScene&) = delete;
     GameScene& operator=(const GameScene&) = delete;
@@ -46,6 +46,7 @@ private:
     void ValidateObject(const GameObject& object) const;
 
     SDL_Renderer* renderer;
+    ResourceManager& resources;
     bool ownsRuntime = false;
     bool initialized = false;
     bool processingFrame = false;

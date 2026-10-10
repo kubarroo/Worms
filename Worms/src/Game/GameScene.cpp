@@ -4,6 +4,7 @@
 #include "Core/Camera/Camera.h"
 #include "Core/GameObject.h"
 #include "Core/Input.h"
+#include "Core/ResourceManager.h"
 #include "Core/Physics/b2ColliderDraw.h"
 #include "ECS/World.h"
 #include "Game/Components.h"
@@ -77,10 +78,13 @@ template <typename Cleanup> void TryCleanup(const char* operation, Cleanup&& cle
 }
 } // namespace
 
-GameScene::GameScene(SDL_Renderer* renderer) : renderer(renderer)
+GameScene::GameScene(SDL_Renderer* renderer, ResourceManager& resources)
+    : renderer(renderer), resources(resources)
 {
     if (!renderer)
         throw std::invalid_argument("Scene requires a renderer");
+    if (resources.Renderer() != renderer)
+        throw std::invalid_argument("Scene and resource manager require the same renderer");
 }
 
 GameScene::~GameScene()
@@ -107,7 +111,7 @@ void GameScene::Initialize()
         contacts = std::make_unique<ContactManager>();
         colliders = std::make_unique<ColliderFactory>(*physicsWorld, *contacts);
         context = std::make_unique<SceneContext>(renderer, *world, *physicsWorld, *this, *colliders,
-                                                 *contacts);
+                                                 *contacts, resources);
         auto camera = std::make_unique<Camera>();
         auto cameraPtr = camera.get();
         this->camera = cameraPtr;
@@ -188,7 +192,7 @@ void GameScene::ValidateObject(const GameObject& object) const
     if (object.context &&
         (&object.context->physics != physicsWorld.get() || object.context->renderer != renderer ||
          &object.context->colliders != colliders.get() ||
-         &object.context->contacts != contacts.get()))
+         &object.context->contacts != contacts.get() || &object.context->resources != &resources))
         throw std::invalid_argument("Object uses different scene services");
 }
 

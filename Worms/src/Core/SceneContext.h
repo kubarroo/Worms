@@ -7,6 +7,7 @@ class b2World;
 class GameObject;
 class ColliderFactory;
 class ContactManager;
+class ResourceManager;
 
 // Commands borrow their recipient; ownership transfers only through QueueAdd.
 class ObjectCommands
@@ -18,7 +19,7 @@ public:
 };
 
 // Non-owning dependencies. The renderer may be null for headless ECS tests.
-// Worlds and commands must outlive every object initialized with this context.
+// All services must outlive every object initialized with this context.
 struct SceneContext
 {
     SDL_Renderer* renderer;
@@ -27,4 +28,5 @@ struct SceneContext
     ObjectCommands& objects;
     ColliderFactory& colliders;
     ContactManager& contacts;
+    ResourceManager& resources;
 };

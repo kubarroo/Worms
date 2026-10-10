@@ -9,6 +9,7 @@ add_executable(worms_tests
     TestHandleSafety.cpp
     TestCleanupSafety.cpp
     TestGameLifetime.cpp
+    TestResourceManager.cpp
     ${WORMS_TEST_GAME_SOURCES}
 )
 target_include_directories(worms_tests PRIVATE

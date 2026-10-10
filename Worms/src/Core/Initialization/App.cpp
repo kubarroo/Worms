@@ -1,5 +1,6 @@
 #include "Core/Initialization/App.h"
 #include "Core/Input.h"
+#include "Core/ResourceManager.h"
 #include "Core/Time.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Terminal/Terminal.h"
@@ -11,6 +12,22 @@
 
 
 App::App() {}
+
+void App::SetAssetRoot(std::filesystem::path root)
+{
+    if (sdlInitialized || resources)
+        throw std::logic_error("Cannot change asset root while the platform is initialized");
+    if (root.empty())
+        throw std::invalid_argument("Asset root must not be empty");
+    assetRoot = std::filesystem::absolute(root).lexically_normal();
+}
+
+ResourceManager& App::Resources() const
+{
+    if (!resources)
+        throw std::logic_error("Resource manager is unavailable");
+    return *resources;
+}
 
 App::~App()
 {
@@ -24,6 +41,7 @@ void App::InitWindow(const std::string& title, const int width, const int height
     try
     {
         InitSDL(title, width, height);
+        resources = std::make_unique<ResourceManager>(renderer.get(), assetRoot);
         InitImGui();
         isRunning = true;
     }
@@ -164,6 +182,7 @@ void App::Clean() noexcept
 {
     isRunning = false;
     StopAudioPlayback();
+    resources.reset();
     if (imguiContext)
     {
         auto* previousContext = ImGui::GetCurrentContext();

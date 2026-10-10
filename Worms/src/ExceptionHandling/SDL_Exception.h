@@ -6,6 +6,8 @@ class SDL_Exception : public AppException
 {
 public:
     SDL_Exception(int line, const char* file) noexcept : AppException(line, file, SDL_GetError()) {}
+    SDL_Exception(int line, const char* file, const char* message) noexcept
+        : AppException(line, file, message) {}
 
     virtual inline const char* GetType() const noexcept
     {
