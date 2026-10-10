@@ -1,6 +1,6 @@
 # Phase 3 Resource Ownership Contract
 
-This is the current contract for phase 3, steps 1 and 2. The older
+This is the current contract for phase 3, steps 1 through 3. The older
 `ownership-and-cleanup.md` is a historical phase-1 proposal. Scene ownership is
 described in `Architecture.md`.
 
@@ -24,15 +24,17 @@ described in `Architecture.md`.
 | Window and renderer | App: WindowPtr and RendererPtr | GameScene, SceneContext, rendering objects, ImGui |
 | Audio device and SDL/ImGui initialization | App | Scene and audio wrappers |
 | Cached textures, sounds and music | App through ResourceManager | SceneContext and asset callers |
-| Weapon/projectile textures and weapon sounds | WeaponManager | Weapon, Projectile, Sprite components |
-| Charge-bar texture | Weapon | Its rendering code |
-| Worm sprite and jump sound | Worm | Its Sprite component and playback |
-| Generated team health-bar texture and death sound | WormTeam | Its worms and HealthBar objects |
-| Particle texture | ParticleSystem | Its particles' Sprite components |
+| Weapon/projectile textures and weapon sounds | ResourceManager | Weapon, Projectile, Sprite components |
+| Charge-bar texture | ResourceManager | Weapon rendering |
+| Worm sprite and jump sound | ResourceManager | Worm, its Sprite component and playback |
+| Generated team health-bar texture | WormTeam | Its worms and HealthBar objects |
+| Team death sound | ResourceManager | WormTeam and playback |
+| Particle texture | ResourceManager | ParticleSystem and its particles' Sprite components |
 | Mutable terrain surface and current texture | Map | Contour generation and its Sprite component |
-| Music | GameScene through Music | Audio playback |
+| Music | ResourceManager through Music | GameScene controls playback |
 
-GameScene cleans active and pending objects before releasing WeaponManager's assets.
+GameScene detaches borrowers; it never clears the shared cache. App releases the cache
+after destroying the scene. WeaponManager owns configurations, not asset caches.
 WormTeam keeps its texture alive until its worms and health bars have been removed.
 Map owns independent mutable terrain pixels and the replacement texture; terrain is
 not a shared mutable cache entry.
@@ -73,9 +75,15 @@ without filesystem queries on cache lookup. Relative, absolute and normalized al
 share an entry; symbolic-link aliases are not resolved. Cache keys use filesystem
 path equality; arbitrary case aliases are not folded, even on Windows.
 
-Existing gameplay loaders remain in their current owners in step 2. Migrating them
-to the cache is step 3. Mutable terrain and generated team textures retain private
-owners. Source images can be shared, but mutable instances must remain independent.
+Gameplay obtains shared file assets through ResourceManager. Object cleanup removes
+entities/components and clears borrowed pointers without freeing cached assets.
+Mutable terrain and generated team textures retain private owners. Map loads its
+own source surface using the manager's asset root and builds private textures; its
+pixel data is never shared with another map.
+
+Missing-file tests use a fresh manager with a separate asset directory. Successful
+loads remain cached after scene startup failure; restoring the missing file permits
+retry on that same manager. Restarting a scene does not require files already cached.
 
 The initial cache keeps assets until full application cleanup. No per-entry eviction
 or hot reload is allowed while borrowers exist. Borrowed pointers remain valid until

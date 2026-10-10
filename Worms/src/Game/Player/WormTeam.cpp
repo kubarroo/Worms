@@ -1,12 +1,13 @@
 #include "Game/Player/WormTeam.h"
+#include "Core/ResourceManager.h"
 #include <algorithm>
 #include <stdexcept>
 
-void WormTeam::Initialise()
+void WormTeam::Initialise(ResourceManager& resources)
 {
     if (initialized)
         throw std::logic_error("WormTeam is already initialized");
-    dieSound = std::make_unique<Sound>("scream.wav");
+    dieSound = &resources.GetSound("scream.wav");
     initialized = true;
 }
 
@@ -133,7 +134,7 @@ void WormTeam::CleanUp()
     }
 
     worms.clear();
-    dieSound.reset();
+    dieSound = nullptr;
     initialized = false;
     activeWorm = 0;
 }

@@ -101,7 +101,7 @@ void WormManager::CreateTeam(int size)
 
     try
     {
-        newTeam->Initialise();
+        newTeam->Initialise(context.resources);
         for (int i = 0; i < size; ++i)
         {
             const Position spawnPosition{

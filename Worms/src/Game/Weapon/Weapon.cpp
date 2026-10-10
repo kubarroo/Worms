@@ -1,10 +1,10 @@
 #include <algorithm>
 #include "Core/Input.h"
+#include "Core/ResourceManager.h"
 #include "Core/Time.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Tags.h"
 #include "Game/Weapon/Weapon.h"
-#include "SDL_image.h"
 
 Weapon::Weapon( Camera& camera ) : camera( camera )
 {
@@ -18,8 +18,7 @@ void Weapon::Initialise(const SceneContext& context)
 		world->AddComponent<Position>( objectId, { 0, 0 } );
 		world->AddComponent<Rotation>( objectId, { 0 } );
 		world->AddComponent<Sprite>( objectId );
-		powerBar.reset( IMG_LoadTexture( renderer, "powerBar.png" ) );
-		SDL_CHECK( powerBar.get() );
+		powerBar = context.resources.GetTexture("powerBar.png");
 		canShoot = true;
 	}
 	catch (...)
@@ -36,7 +35,7 @@ void Weapon::CleanUp()
     projTexture = nullptr;
     explosionSound = collisionSound = shootingSound = nullptr;
     GameObject::CleanUp();
-    powerBar.reset();
+    powerBar = nullptr;
 }
 
 std::optional<Position> Weapon::GetParentPosition()
@@ -108,7 +107,7 @@ void Weapon::Render()
 	auto& pos = world->GetComponent<Position>( objectId );
 	auto& rot = world->GetComponent<Rotation>( objectId );
 	SDL_Point size;
-	SDL_QueryTexture( powerBar.get(), NULL, NULL, &size.x, &size.y );
+	SDL_QueryTexture( powerBar, NULL, NULL, &size.x, &size.y );
 
 	SDL_Rect slice(
 		0,
@@ -125,5 +124,5 @@ void Weapon::Render()
 	SDL_Point centre( 0, size.y / 2 );
 
 
-	SDL_RenderCopyEx( renderer, powerBar.get(), &slice, &renderQuad, -rot.degree, &centre, SDL_FLIP_NONE );
+	SDL_RenderCopyEx( renderer, powerBar, &slice, &renderQuad, -rot.degree, &centre, SDL_FLIP_NONE );
 }

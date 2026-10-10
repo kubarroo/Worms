@@ -1,11 +1,9 @@
 #pragma once
 #include "Core/GameObject.h"
-#include "Core/SDLHandles.h"
 #include "Core/Time.h"
 #include "ECS/System.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Components.h"
-#include "SDL_image.h"
 #include <random>
 
 class ParticleSystem : public GameObject
@@ -29,5 +27,6 @@ private:
     float length = 5.f;
     float progress = 0.f;
     std::vector<EntityId> particles;
-    Sdl::TexturePtr texture;
+    // Borrowed; particle entities are removed before detaching the texture.
+    SDL_Texture* texture = nullptr;
 };

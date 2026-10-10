@@ -43,7 +43,7 @@ private:
 	Time::Timer timer;
 	Parameters params{};
 
-    // Borrowed from WeaponManager; it outlives active and pending projectiles.
+    // Borrowed from ResourceManager; it outlives active and pending projectiles.
 	SDL_Texture* texture = nullptr;
 	Sound* explosionSound = nullptr;
 	Sound* collisionSound = nullptr;

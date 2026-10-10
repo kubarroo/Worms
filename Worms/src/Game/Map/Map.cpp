@@ -2,6 +2,7 @@
 #include "Core/Physics/ColliderFactory.h"
 #include "Core/Physics/ContactManager.h"
 #include "Core/Utils.h"
+#include "Core/ResourceManager.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Components.h"
 #include "SDL2/SDL_surface.h"
@@ -22,7 +23,8 @@ void Map::Initialise(const SceneContext& context)
         physicsInfo.id = objectId;
         physicsInfo.tag = PhysicsTag::MAP;
         world->AddComponent<Position>(objectId, {1.5f, -2.f});
-        physTex = IMG_LoadPhysicTexture(renderer, "map.png");
+        const auto mapPath = (context.resources.AssetRoot() / "map.png").string();
+        physTex = IMG_LoadPhysicTexture(renderer, mapPath.c_str());
         SDL_CHECK((physTex ? physTex->surface.get() : nullptr));
         destructionSubscription =
             Context().contacts.AddEvent(objectId, CollisionType::BEGIN,

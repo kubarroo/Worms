@@ -3,48 +3,30 @@
 #include <stdexcept>
 #include <utility>
 
-WeaponManager::WeaponManager(SDL_Renderer& renderer, Weapon& weapon)
-    : renderer(&renderer), weapon(&weapon)
+WeaponManager::WeaponManager(ResourceManager& resources, Weapon& weapon)
+    : resources(resources), weapon(&weapon)
 {
-}
-
-void WeaponManager::LoadTexture(const std::string& path)
-{
-    if (textures.contains(path))
-        return;
-
-    TexturePtr texture(IMG_LoadTexture(renderer, path.c_str()));
-    SDL_CHECK(texture.get());
-    textures.emplace(path, std::move(texture));
-}
-
-void WeaponManager::LoadSound(const std::string& path)
-{
-    if (path.empty() || sounds.contains(path))
-        return;
-
-    sounds.emplace(path, std::make_unique<Sound>(path));
 }
 
 void WeaponManager::ApplyCurrentWeapon()
 {
     const auto& params = *weapons.at(currentWeapon);
     weapon->SetParams(params);
-    weapon->SetTexture(textures.at(params.weaponTexturePath).get());
-    weapon->SetProjectileTexture(textures.at(params.projectileTexturePath).get());
+    weapon->SetTexture(resources.GetTexture(params.weaponTexturePath));
+    weapon->SetProjectileTexture(resources.GetTexture(params.projectileTexturePath));
     weapon->SetExplosionSound(params.explosionSound.empty()
-                                 ? nullptr : sounds.at(params.explosionSound).get());
+                                 ? nullptr : &resources.GetSound(params.explosionSound));
     weapon->SetShootingSound(params.shootingSound.empty()
-                                ? nullptr : sounds.at(params.shootingSound).get());
+                                ? nullptr : &resources.GetSound(params.shootingSound));
     weapon->SetCollisionSound(params.collisionSound.empty()
-                                 ? nullptr : sounds.at(params.collisionSound).get());
+                                 ? nullptr : &resources.GetSound(params.collisionSound));
 }
 
 void WeaponManager::Initialise()
 {
     if (initialized)
         throw std::logic_error("WeaponManager is already initialized");
-    if (!renderer || !weapon || !weapon->HasEntity())
+    if (!resources.Renderer() || !weapon || !weapon->HasEntity())
         throw std::logic_error("WeaponManager requires a renderer and an initialized weapon");
 
     if (weapons.empty())
@@ -57,11 +39,11 @@ void WeaponManager::Initialise()
 
     for (const auto& params : weapons)
     {
-        LoadTexture(params->weaponTexturePath);
-        LoadTexture(params->projectileTexturePath);
-        LoadSound(params->explosionSound);
-        LoadSound(params->collisionSound);
-        LoadSound(params->shootingSound);
+        resources.GetTexture(params->weaponTexturePath);
+        resources.GetTexture(params->projectileTexturePath);
+        for (const auto* path : {&params->explosionSound, &params->collisionSound,
+                                &params->shootingSound})
+            if (!path->empty()) resources.GetSound(*path);
     }
 
     currentWeapon = 0;

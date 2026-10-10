@@ -14,7 +14,6 @@
 class Worm : public GameObject
 {
 public:
-    using TexturePtr = Sdl::TexturePtr;
     Worm(const Camera& camera, SDL_Texture* healthTexture, Position spawnPosition);
     void Initialise(const SceneContext& context) override;
     void Update(std::vector<Worm*>& wormsToDelete);
@@ -34,10 +33,11 @@ private:
     // Borrowed from WormTeam, which owns this worm and its health bar.
     SDL_Texture* healthTexture;
     Position spawnPosition;
-    std::unique_ptr<Sound> jumpSound;
+    // Shared assets borrowed from ResourceManager.
+    Sound* jumpSound = nullptr;
     std::unique_ptr<HealthBar> healthBar;
     std::unique_ptr<Collider> collider = NULL;
-    TexturePtr spriteTexture;
+    SDL_Texture* spriteTexture = nullptr;
 
     bool grounded = false;
     bool active = false;

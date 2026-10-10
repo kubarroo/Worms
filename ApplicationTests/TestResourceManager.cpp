@@ -126,6 +126,10 @@ TEST_F(ResourceCache, AssetRootDoesNotFollowWorkingDirectoryChanges)
     EXPECT_NE(cache.GetTexture("worms.png"), nullptr);
     EXPECT_NO_THROW(cache.GetSound("jump.wav"));
     EXPECT_NO_THROW(cache.GetMusic("Rick_Roll.ogg"));
+    GameScene scene(app.Renderer(), cache);
+    ASSERT_NO_THROW(scene.Initialize());
+    EXPECT_NO_THROW(scene.Render());
+    scene.CleanUp();
 }
 
 TEST_F(ResourceCache, CacheSurvivesSceneCleanupAndRejectsAnotherRenderer)

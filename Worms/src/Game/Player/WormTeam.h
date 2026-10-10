@@ -11,7 +11,7 @@ public:
 
     explicit WormTeam(TexturePtr texture) : healthBarTexture(std::move(texture)) {}
 
-    void Initialise();
+    void Initialise(ResourceManager& resources);
     void AddWorm(std::unique_ptr<Worm> worm);
     void RemoveWorm(Worm* worm);
     void ChangeActiveWorm();
@@ -32,7 +32,8 @@ private:
     TexturePtr healthBarTexture;
     std::vector<std::unique_ptr<Worm>> worms;
     std::vector<Worm*> wormsToDelete;
-    std::unique_ptr<Sound> dieSound;
+    // Borrowed from ResourceManager; survives deletion of the last worm/team.
+    Sound* dieSound = nullptr;
     bool initialized = false;
     int activeWorm = 0;
 };

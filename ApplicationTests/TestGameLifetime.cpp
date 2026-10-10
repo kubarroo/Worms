@@ -156,7 +156,8 @@ struct MapTestAccess
 
 struct WeaponTestAccess
 {
-    static int OwnedResources(const Weapon& weapon) { return static_cast<bool>(weapon.powerBar); }
+    static SDL_Texture* PowerBar(const Weapon& weapon) { return weapon.powerBar; }
+    static int AssetReferences(const Weapon& weapon) { return static_cast<bool>(weapon.powerBar); }
     static bool HasParent(const Weapon& weapon) { return weapon.parentId.has_value(); }
     static float Charge(const Weapon& weapon) { return weapon.force; }
     static void SetCharge(Weapon& weapon) { weapon.force = 0.5f; }
@@ -164,7 +165,9 @@ struct WeaponTestAccess
 
 struct ParticleSystemTestAccess
 {
-    static int OwnedResources(const ParticleSystem& particles)
+    static SDL_Texture* Texture(const ParticleSystem& particles) { return particles.texture; }
+    static EntityId FirstParticle(const ParticleSystem& particles) { return particles.particles.front(); }
+    static int AssetReferences(const ParticleSystem& particles)
     {
         return static_cast<bool>(particles.texture);
     }
@@ -292,6 +295,11 @@ public:
     {
         return {Renderer(), world, Physics(), Scene(), Context().colliders, Context().contacts, Context().resources};
     }
+    SceneContext ContextWith(ResourceManager& resources)
+    {
+        return {resources.Renderer(), Registry(), Physics(), Scene(),
+                Context().colliders, Context().contacts, resources};
+    }
     SceneContext ContextWith(SDL_Renderer* renderer)
     {
         return {renderer, Registry(), Physics(), Scene(), Context().colliders, Context().contacts, Context().resources};
@@ -410,7 +418,7 @@ protected:
                               SDL_TEXTUREACCESS_STATIC, 40, 10));
         ASSERT_NE(texture.get(), nullptr);
         team = std::make_unique<WormTeam>(std::move(texture));
-        team->Initialise();
+        team->Initialise(game.Assets());
     }
 
     Worm* AddTrackedWorm()
@@ -481,8 +489,9 @@ TEST_F(GameLifetime, FailedSecondSceneStartupDoesNotInvalidateRunningPhysicsServ
 {
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     const auto active = GameTestAccess::ActiveWorm(game);
-    GameScene second(game.Renderer(), game.Assets());
     SceneAssetsWithout assets("powerBar.png");
+    ResourceManager resources(game.Renderer(), assets.Directory());
+    GameScene second(game.Renderer(), resources);
     {
         ScopedWorkingDirectory directory(assets.Directory());
         EXPECT_THROW(second.Initialize(), SDL_Exception);
@@ -494,6 +503,8 @@ TEST_F(GameLifetime, FailedSecondSceneStartupDoesNotInvalidateRunningPhysicsServ
     EXPECT_EQ(GameTestAccess::ActiveWorm(game), active);
     EXPECT_NO_THROW(game.Update());
     EXPECT_NO_THROW(game.Render());
+    std::filesystem::copy_file(game.Assets().AssetRoot() / "powerBar.png",
+                               assets.Directory() / "powerBar.png");
     ASSERT_NO_THROW(second.Initialize());
     EXPECT_EQ(GameTestAccess::SubscriptionCount(second), subscriptions);
     second.CleanUp();
@@ -576,10 +587,11 @@ TEST_F(GameLifetime, FailedSceneInitializationRollsBackAndCanBeRetried)
 {
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     GameTestAccess::ResetScene(game);
-    GameScene scene(game.Renderer(), game.Assets());
+    SceneAssetsWithout assets("worms.png");
+    ResourceManager resources(game.Renderer(), assets.Directory());
+    GameScene scene(game.Renderer(), resources);
     {
-        // The project root has no gameplay assets, so initialization fails after physics setup.
-        ScopedWorkingDirectory directory(std::filesystem::current_path().parent_path());
+        // A fresh cache must expose the missing sprite during startup.
         EXPECT_THROW(scene.Initialize(), SDL_Exception);
     }
     EXPECT_FALSE(GameTestAccess::HasResources(scene));
@@ -589,6 +601,8 @@ TEST_F(GameLifetime, FailedSceneInitializationRollsBackAndCanBeRetried)
     EXPECT_NO_THROW(scene.Update());
     EXPECT_NO_THROW(scene.Render());
     EXPECT_NO_THROW(scene.RenderDebug());
+    std::filesystem::copy_file(game.Assets().AssetRoot() / "worms.png",
+                               assets.Directory() / "worms.png");
     ASSERT_NO_THROW(scene.Initialize());
     EXPECT_EQ(GameTestAccess::SubscriptionCount(scene), subscriptions);
     scene.CleanUp();
@@ -673,7 +687,8 @@ TEST_F(GameLifetime, FailedGameStartupRollsBackPlatformAndCanBeRetried)
 {
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     game.Clean();
-    for (const auto* missing : {"worms.png", "powerBar.png", "map.png", "Rick_Roll.ogg"})
+    for (const auto* missing : {"worms.png", "jump.wav", "scream.wav", "grenade.png",
+                               "powerBar.png", "map.png", "Rick_Roll.ogg"})
     {
         SCOPED_TRACE(missing);
         {
@@ -753,7 +768,7 @@ TEST_F(GameLifetime, GameplayConstructorsDoNotAllocateEntitiesBodiesOrSubscripti
     HealthBar bar(camera->GetId(), *camera, 100, nullptr);
     FocusPoint focus;
     Weapon localWeapon(*camera);
-    WeaponManager weapons(*game.Renderer(), localWeapon);
+    WeaponManager weapons(game.Assets(), localWeapon);
     WormManager worms(game.Context(), *camera, localWeapon);
     WormTeam emptyTeam(nullptr);
     const auto cameraX = camera->X();
@@ -897,8 +912,8 @@ TEST_F(GameLifetime, TeamRejectsWormsBeforeInitializationAndAfterCleanupWithoutL
     };
     reject();
     EXPECT_EQ(destroyedWorms, 1);
-    ASSERT_NO_THROW(team->Initialise());
-    EXPECT_THROW(team->Initialise(), std::logic_error);
+    ASSERT_NO_THROW(team->Initialise(game.Assets()));
+    EXPECT_THROW(team->Initialise(game.Assets()), std::logic_error);
     EXPECT_THROW(team->AddWorm(nullptr), std::invalid_argument);
     EXPECT_THROW(
         team->AddWorm(std::make_unique<Worm>(*camera, team->GetHealthBarTexture(), Position{0, 2})),
@@ -908,7 +923,7 @@ TEST_F(GameLifetime, TeamRejectsWormsBeforeInitializationAndAfterCleanupWithoutL
     team->CleanUp();
     reject();
     EXPECT_EQ(destroyedWorms, 3);
-    ASSERT_NO_THROW(team->Initialise());
+    ASSERT_NO_THROW(team->Initialise(game.Assets()));
     AddTrackedWorm();
     EXPECT_EQ(team->Size(), 1);
     team->CleanUp();
@@ -1294,8 +1309,9 @@ TEST_F(GameLifetime, MissingWeaponPowerBarRollsBackWithoutDanglingManagerReferen
 {
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     GameTestAccess::ResetScene(game);
-    GameScene scene(game.Renderer(), game.Assets());
     SceneAssetsWithout assets("powerBar.png");
+    ResourceManager resources(game.Renderer(), assets.Directory());
+    GameScene scene(game.Renderer(), resources);
     {
         ScopedWorkingDirectory directory(assets.Directory());
         try
@@ -1305,7 +1321,7 @@ TEST_F(GameLifetime, MissingWeaponPowerBarRollsBackWithoutDanglingManagerReferen
         }
         catch (const SDL_Exception& error)
         {
-            EXPECT_EQ(std::filesystem::path(error.GetFile()).filename(), "Weapon.cpp");
+            EXPECT_EQ(std::filesystem::path(error.GetFile()).filename(), "ResourceManager.cpp");
         }
     }
     EXPECT_FALSE(GameTestAccess::HasResources(scene));
@@ -1314,6 +1330,8 @@ TEST_F(GameLifetime, MissingWeaponPowerBarRollsBackWithoutDanglingManagerReferen
     EXPECT_THROW(scene.Context(), std::logic_error);
     EXPECT_EQ(SDL_RenderClear(game.Renderer()), 0);
     EXPECT_NO_THROW(scene.CleanUp());
+    std::filesystem::copy_file(game.Assets().AssetRoot() / "powerBar.png",
+                               assets.Directory() / "powerBar.png");
     ASSERT_NO_THROW(scene.Initialize());
     EXPECT_EQ(GameTestAccess::Registry(scene).GetAmountOfAvailableEntities(), initialEntities);
     EXPECT_EQ(GameTestAccess::Physics(scene).GetBodyCount(), initialBodies);
@@ -1326,8 +1344,9 @@ TEST_F(GameLifetime, MissingMusicRollsBackFullyConstructedGameplayAndAllowsRetry
 {
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     GameTestAccess::ResetScene(game);
-    GameScene scene(game.Renderer(), game.Assets());
     SceneAssetsWithout assets("Rick_Roll.ogg");
+    ResourceManager resources(game.Renderer(), assets.Directory());
+    GameScene scene(game.Renderer(), resources);
     {
         ScopedWorkingDirectory directory(assets.Directory());
         try
@@ -1351,6 +1370,8 @@ TEST_F(GameLifetime, MissingMusicRollsBackFullyConstructedGameplayAndAllowsRetry
     EXPECT_EQ(SDL_RenderClear(game.Renderer()), 0);
     EXPECT_NO_THROW(scene.CleanUp());
 
+    std::filesystem::copy_file(game.Assets().AssetRoot() / "Rick_Roll.ogg",
+                               assets.Directory() / "Rick_Roll.ogg");
     ASSERT_NO_THROW(scene.Initialize());
     EXPECT_EQ(GameTestAccess::Registry(scene).GetAmountOfAvailableEntities(), initialEntities);
     EXPECT_EQ(GameTestAccess::Physics(scene).GetBodyCount(), initialBodies);
@@ -1715,7 +1736,9 @@ TEST_F(GameLifetime, FailedCameraInitializationAutomaticallyReleasesItsEntity)
 TEST_F(GameLifetime, FailedWeaponTextureLoadAutomaticallyReleasesItsEntity)
 {
     Weapon localWeapon(*camera);
-    EXPECT_THROW(localWeapon.Initialise(game.ContextWith(nullptr)), SDL_Exception);
+    SceneAssetsWithout assets("powerBar.png");
+    ResourceManager resources(game.Renderer(), assets.Directory());
+    EXPECT_THROW(localWeapon.Initialise(game.ContextWith(resources)), SDL_Exception);
     EXPECT_FALSE(localWeapon.HasEntity());
     EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
     EXPECT_NO_THROW(localWeapon.CleanUp());
@@ -1779,6 +1802,70 @@ TEST_F(GameLifetime, WeaponAndProjectileCleanupPreserveBorrowedTexture)
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
 }
 
+TEST_F(GameLifetime, WormsShareSpriteAndTeamRemovalPreservesCachedDeathSound)
+{
+    CreateTestTeam();
+    auto* first = AddTrackedWorm();
+    auto* second = AddTrackedWorm();
+    auto* sprite = game.Assets().GetTexture("worms.png");
+    EXPECT_EQ(game.Registry().GetComponent<Sprite>(first->GetId()).texture, sprite);
+    EXPECT_EQ(game.Registry().GetComponent<Sprite>(second->GetId()).texture, sprite);
+    const auto secondId = second->GetId();
+    team->RemoveWorm(first);
+    EXPECT_EQ(game.Registry().GetComponent<Sprite>(secondId).texture, sprite);
+    EXPECT_EQ(SDL_QueryTexture(sprite, nullptr, nullptr, nullptr, nullptr), 0);
+    game.Assets().GetSound("scream.wav").Play(100);
+    team->RemoveWorm(second);
+    team->CleanUp();
+    team.reset();
+    EXPECT_GT(Mix_Playing(-1), 0);
+    EXPECT_EQ(game.Assets().GetTexture("worms.png"), sprite);
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+}
+
+TEST_F(GameLifetime, ParticleEffectsShareTextureAndCleanupPreservesOtherParticles)
+{
+    ParticleSystem first("blood.png", 1, 0, 0, 2);
+    ParticleSystem second("blood.png", 1, 0, 0, 2);
+    first.Initialise(game.Context());
+    second.Initialise(game.Context());
+    auto* texture = game.Assets().GetTexture("blood.png");
+    EXPECT_EQ(ParticleSystemTestAccess::Texture(first), texture);
+    EXPECT_EQ(ParticleSystemTestAccess::Texture(second), texture);
+    first.CleanUp();
+    EXPECT_EQ(ParticleSystemTestAccess::Texture(first), nullptr);
+    EXPECT_EQ(game.Registry().GetComponent<Sprite>(
+                  ParticleSystemTestAccess::FirstParticle(second)).texture, texture);
+    EXPECT_EQ(SDL_QueryTexture(texture, nullptr, nullptr, nullptr, nullptr), 0);
+    second.CleanUp();
+    EXPECT_EQ(game.Assets().GetTexture("blood.png"), texture);
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+}
+
+TEST_F(GameLifetime, WeaponManagerDestructionAndWeaponCleanupPreserveProjectileAssets)
+{
+    Weapon localWeapon(*camera);
+    localWeapon.Initialise(game.Context());
+    auto* powerBar = game.Assets().GetTexture("powerBar.png");
+    EXPECT_EQ(WeaponTestAccess::PowerBar(localWeapon), powerBar);
+    auto* grenade = game.Assets().GetTexture("grenade.png");
+    {
+        WeaponManager localManager(game.Assets(), localWeapon);
+        localManager.Initialise();
+        EXPECT_EQ(game.Registry().GetComponent<Sprite>(localWeapon.GetId()).texture, grenade);
+    }
+    Projectile projectile(0, 2, 0, 0);
+    projectile.SetTexture(grenade);
+    projectile.Initialise(game.Context());
+    localWeapon.CleanUp();
+    EXPECT_EQ(game.Registry().GetComponent<Sprite>(projectile.GetId()).texture, grenade);
+    EXPECT_EQ(SDL_QueryTexture(grenade, nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(SDL_QueryTexture(powerBar, nullptr, nullptr, nullptr, nullptr), 0);
+    projectile.CleanUp();
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+    EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+}
+
 TEST_F(GameLifetime, RepeatedObjectLifecyclesRestoreEntitiesBodiesAndSubscriptions)
 {
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
@@ -1786,12 +1873,12 @@ TEST_F(GameLifetime, RepeatedObjectLifecyclesRestoreEntitiesBodiesAndSubscriptio
     {
         ParticleSystem particles("blood.png", 1, 0, 0, 4);
         particles.Initialise(game.Context());
-        EXPECT_EQ(ParticleSystemTestAccess::OwnedResources(particles), 1);
+        EXPECT_EQ(ParticleSystemTestAccess::AssetReferences(particles), 1);
         const auto particleId = particles.GetId();
         EXPECT_THROW(particles.Initialise(game.Context()), std::logic_error);
         EXPECT_EQ(particles.GetId(), particleId);
         particles.CleanUp();
-        EXPECT_EQ(ParticleSystemTestAccess::OwnedResources(particles), 0);
+        EXPECT_EQ(ParticleSystemTestAccess::AssetReferences(particles), 0);
         EXPECT_EQ(ParticleSystemTestAccess::ParticleCount(particles), 0);
         EXPECT_NO_THROW(particles.CleanUp());
         EXPECT_NO_THROW(particles.Update());
@@ -1807,12 +1894,12 @@ TEST_F(GameLifetime, RepeatedObjectLifecyclesRestoreEntitiesBodiesAndSubscriptio
 
         Weapon localWeapon(*camera);
         localWeapon.Initialise(game.Context());
-        EXPECT_EQ(WeaponTestAccess::OwnedResources(localWeapon), 1);
+        EXPECT_EQ(WeaponTestAccess::AssetReferences(localWeapon), 1);
         const auto weaponId = localWeapon.GetId();
         EXPECT_THROW(localWeapon.Initialise(game.Context()), std::logic_error);
         EXPECT_EQ(localWeapon.GetId(), weaponId);
         localWeapon.CleanUp();
-        EXPECT_EQ(WeaponTestAccess::OwnedResources(localWeapon), 0);
+        EXPECT_EQ(WeaponTestAccess::AssetReferences(localWeapon), 0);
         EXPECT_NO_THROW(localWeapon.CleanUp());
 
         Projectile projectile(0, 2, 0, 0);
@@ -1849,7 +1936,7 @@ TEST_F(GameLifetime, ExpiredParticlesAreRemovedThroughTheGameQueueAndRestoreCoun
         ~ExpiringParticles() override
         {
             EXPECT_FALSE(HasEntity());
-            EXPECT_EQ(ParticleSystemTestAccess::OwnedResources(*this), 0);
+            EXPECT_EQ(ParticleSystemTestAccess::AssetReferences(*this), 0);
             EXPECT_EQ(ParticleSystemTestAccess::ParticleCount(*this), 0);
             ++*destroyed;
         }
@@ -1870,7 +1957,7 @@ TEST_F(GameLifetime, ExpiredParticlesAreRemovedThroughTheGameQueueAndRestoreCoun
         const auto handle = game.Registry().GetHandle(pointer->GetId());
         ASSERT_TRUE(handle);
         EXPECT_EQ(ParticleSystemTestAccess::ParticleCount(*pointer), 4);
-        EXPECT_EQ(ParticleSystemTestAccess::OwnedResources(*pointer), 1);
+        EXPECT_EQ(ParticleSystemTestAccess::AssetReferences(*pointer), 1);
         EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities - 5);
         {
             ScopedDeltaTime expire(6);

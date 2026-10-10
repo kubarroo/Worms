@@ -65,5 +65,5 @@ private:
     std::unique_ptr<b2ColliderDraw> b2DebugDraw;
     std::unique_ptr<WormManager> wormManager;
     std::unique_ptr<WeaponManager> weaponManager;
-    std::unique_ptr<Music> music;
+    Music* music = nullptr;
 };

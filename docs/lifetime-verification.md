@@ -27,7 +27,13 @@ Tests in `ApplicationTests/TestGameLifetime.cpp` use SDL `dummy` drivers and the
 | Shutdown dependency order | Objects observe detached physics callbacks but live worlds, renderer, audio device, and shared weapon texture; addition/removal requests are rejected during cleanup |
 | Session state | Held input and pending weapon change are reset; the first frame after resetting the frame clock has zero elapsed time |
 
-Repeated cycles compare available entity slots, Box2D bodies, subscriptions, and object queues. Tests also check owned particle-system and weapon textures, and the map texture and surface before and after cleanup. These checks cover selected owners; they are not a global counter of all SDL allocations or proof that no leaks exist.
+Repeated cycles compare available entity slots, Box2D bodies, subscriptions, and
+object queues. Tests check that weapon and particle-system asset references are
+cleared without freeing cached textures, and that the map's private texture and
+surface are released. Additional tests verify shared worm/particle textures,
+continued death-sound playback after team deletion, and projectile assets surviving
+WeaponManager destruction. These are not global SDL allocation counters or proof
+that no leaks exist.
 
 ## Running Tests
 

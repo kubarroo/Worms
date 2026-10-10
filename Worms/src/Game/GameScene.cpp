@@ -122,7 +122,7 @@ void GameScene::Initialize()
         auto weapon = std::make_unique<Weapon>(*cameraPtr);
         auto* weaponPtr = weapon.get();
         QueueAdd(std::move(weapon));
-        weaponManager = std::make_unique<WeaponManager>(*renderer, *weaponPtr);
+        weaponManager = std::make_unique<WeaponManager>(resources, *weaponPtr);
         wormManager = std::make_unique<WormManager>(*context, *cameraPtr, *weaponPtr);
         wormManager->Initialise();
         wormManager->CreateTeam(4);
@@ -141,7 +141,7 @@ void GameScene::Initialize()
 
         cameraPtr->ChangeTarget(wormManager->GetActiveWormId());
 
-        music = std::make_unique<Music>("Rick_Roll.ogg");
+        music = &resources.GetMusic("Rick_Roll.ogg");
         music->Play();
         Input::Get().Reset();
         Time::ResetFrameClock();
@@ -423,7 +423,7 @@ void GameScene::CleanUp() noexcept
     activeObjects.clear();
 
     weaponManager.reset();
-    music.reset();
+    music = nullptr;
     b2DebugDraw.reset();
     failedStartupObject.reset();
     context.reset();

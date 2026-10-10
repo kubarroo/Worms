@@ -12,7 +12,6 @@
 class Weapon : public GameObject
 {
 public:
-    using TexturePtr = Sdl::TexturePtr;
     Weapon(Camera& camera);
 
     void Initialise(const SceneContext& context) override;
@@ -71,8 +70,8 @@ private:
     std::optional<EntityHandle> parentId;
     float force = 0;
     bool canShoot = true;
-    TexturePtr powerBar;
-    // Borrowed from WeaponManager; cleanup never frees these assets.
+    // Borrowed from ResourceManager; cleanup never frees these assets.
+    SDL_Texture* powerBar = nullptr;
     SDL_Texture* projTexture = nullptr;
     Sound* explosionSound = nullptr;
     Sound* collisionSound = nullptr;

@@ -1,12 +1,13 @@
 # Scene Lifetimes
 
-`App` owns the platform: SDL initialization, window, renderer, events, and ImGui.
+`App` owns the platform and ResourceManager: SDL initialization, window, renderer,
+events, ImGui, and shared file assets.
 `Game` owns `GameScene` and releases it before the platform is shut down.
 
 ## Dependency Context
 
 `SceneContext` borrows the renderer, ECS world, physics world, `ObjectCommands`,
-collider factory, and contact manager.
+collider factory, contact manager, and ResourceManager.
 It is not a resource owner or a global service locator. Objects store a copy of
 the context, so a temporary context value is safe; its referenced dependencies
 must still outlive the object. A null renderer is supported for headless tests.
@@ -23,13 +24,15 @@ contact manager supplied by the factory, never a global registry.
 
 | Owner | Owned resources | Borrowed dependencies |
 | --- | --- | --- |
-| `GameScene` | ECS, physics world, collider factory, contact manager, camera, weapon, map, projectiles, particles, managers, music | App renderer |
+| `App` / `ResourceManager` | Platform and shared textures, sounds, music | None |
+| `GameScene` | ECS, physics world, collider factory, contact manager, camera, weapon, map, projectiles, particles, managers | App renderer and ResourceManager, music |
 | `WormManager` | Teams | Context, camera, weapon |
-| `WormTeam` | Worms, health-bar texture, death sound | None |
-| `Worm` | Sprite texture, jump sound, health bar, collider wrapper | Camera, team health-bar texture, context |
+| `WormTeam` | Worms, health-bar texture | Cached death sound |
+| `Worm` | Health bar, collider wrapper | Cached sprite and jump sound, camera, team health-bar texture, context |
 | `Camera` | Focus point | Context |
-| `WeaponManager` | Weapon configurations, shared textures and sounds | Renderer, scene-owned weapon |
-| `Weapon` / `Projectile` | Object-specific resources | Shared weapon-manager textures and sounds, context |
+| `WeaponManager` | Weapon configurations | ResourceManager, scene-owned weapon |
+| `Weapon` / `Projectile` | Object-specific entities and physics | Cached textures and sounds, context |
+| `ParticleSystem` | Particle entities and effect state | Cached particle texture, context |
 
 Box2D owns its bodies. Object cleanup explicitly destroys the bodies it created
 while the physics world is still alive. ECS components borrow texture/body pointers.
@@ -72,11 +75,11 @@ Scene cleanup follows this order:
    Pending additions are discarded without being initialized.
 5. Consume deferred contact errors and clear collision subscriptions.
 6. Destroy the worm manager, clear removal requests, and destroy scene objects.
-7. Release shared weapon resources, music, debug draw, and the retained failed
-   startup object, then the context, factory, physics world, contact manager,
-   and ECS world.
+7. Destroy weapon configurations and debug draw, detach music, and destroy the
+   retained failed startup object, then the context, factory, physics world,
+   contact manager, and ECS world. The application-owned cache remains alive.
 
-Shared weapon resources outlive their borrowers, and the renderer remains
+Cached assets outlive their scene borrowers, and the renderer remains
 available throughout scene cleanup. A failed startup object remains owned until
 dependent managers have been cleaned and destroyed. Cleanup is idempotent and
 `noexcept`; individual object cleanup failures are logged without stopping the

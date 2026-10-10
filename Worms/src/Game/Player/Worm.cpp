@@ -1,5 +1,6 @@
 #include "Game/Player/Worm.h"
 #include "Core/Input.h"
+#include "Core/ResourceManager.h"
 #include "Core/ParticleSystem.h"
 #include "Core/Physics/ContactManager.h"
 #include "Core/Time.h"
@@ -20,7 +21,7 @@ void Worm::Initialise(const SceneContext& context)
     GameObject::Initialise(context);
     try
     {
-        jumpSound = std::make_unique<Sound>("jump.wav");
+        jumpSound = &context.resources.GetSound("jump.wav");
         auto& pos = world->AddComponent<Position>(objectId, Position{spawnPosition.x, spawnPosition.y});
 
         physicsInfo.tag = PhysicsTag::WORM;
@@ -41,9 +42,8 @@ void Worm::Initialise(const SceneContext& context)
         groundedPhysicsInfo.id = groundedId;
 
         Sprite& spriteComponent = world->AddComponent<Sprite>(objectId);
-        spriteTexture.reset(IMG_LoadTexture(renderer, "worms.png"));
-        SDL_CHECK(spriteTexture.get());
-        spriteComponent.texture = spriteTexture.get();
+        spriteTexture = context.resources.GetTexture("worms.png");
+        spriteComponent.texture = spriteTexture;
 
         b2PolygonShape shape;
 
@@ -154,8 +154,8 @@ void Worm::CleanUp()
         healthBar.reset();
     }
     GameObject::CleanUp();
-    spriteTexture.reset();
-    jumpSound.reset();
+    spriteTexture = nullptr;
+    jumpSound = nullptr;
     active = grounded = false;
 }
 

@@ -1,4 +1,5 @@
 #include "ParticleSystem.h"
+#include "Core/ResourceManager.h"
 #include <stdexcept>
 
 ParticleSystem::ParticleSystem(std::string particleImg, float startScale, float startPosX,
@@ -22,8 +23,8 @@ void ParticleSystem::CleanUp()
         world->DestroyEntity(particle);
     }
     particles.clear();
-    texture.reset();
     GameObject::CleanUp();
+    texture = nullptr;
     timer = progress = 0;
 }
 
@@ -48,8 +49,7 @@ void ParticleSystem::Initialise(const SceneContext& context)
     GameObject::Initialise(context);
     try
     {
-        texture.reset(IMG_LoadTexture(renderer, particleImg.c_str()));
-        SDL_CHECK(texture.get());
+        texture = context.resources.GetTexture(particleImg);
         particles.reserve(static_cast<std::size_t>(amountOfParticles));
         for (int i = 0; i < amountOfParticles; i++)
         {
@@ -64,7 +64,7 @@ void ParticleSystem::Initialise(const SceneContext& context)
                                            [](double x) { return x * 0.98; }});
             world->AddComponent<Position>(particleId, {startPosX, startPosY});
             world->AddComponent<Motion>(particleId, {vel.x, vel.y});
-            world->AddComponent<Sprite>(particleId, {texture.get()});
+            world->AddComponent<Sprite>(particleId, {texture});
             world->AddComponent<Scale>(particleId, {startScale * rand() / RAND_MAX});
         }
     }
