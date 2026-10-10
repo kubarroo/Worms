@@ -36,7 +36,6 @@ int main(int argc, char** argv)
     }
 
     std::unique_ptr<App> game = std::make_unique<Game>();
-    Time::Timer timer{};
     int exitCode = 0;
 
     try
@@ -47,7 +46,7 @@ int main(int argc, char** argv)
         {
             try
             {
-                Time::deltaTime = timer.Reset();
+                Time::UpdateFrameTime();
                 game->HandleEvents();
                 game->Update();
                 game->PreRender();

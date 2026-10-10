@@ -11,8 +11,16 @@ Game::~Game()
 void Game::InitWindow(const std::string& title, const int width, const int height)
 {
     App::InitWindow(title, width, height);
-    scene = std::make_unique<GameScene>(renderer);
-    scene->Initialize();
+    try
+    {
+        scene = std::make_unique<GameScene>(renderer);
+        scene->Initialize();
+    }
+    catch (...)
+    {
+        Clean();
+        throw;
+    }
 }
 
 void Game::Update()
@@ -31,7 +39,7 @@ void Game::Render()
         scene->RenderDebug();
 }
 
-void Game::Clean()
+void Game::Clean() noexcept
 {
     scene.reset();
     App::Clean();

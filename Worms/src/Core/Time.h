@@ -4,6 +4,8 @@
 namespace Time
 {
 extern double deltaTime;
+void ResetFrameClock() noexcept;
+void UpdateFrameTime() noexcept;
 
 class Timer
 {

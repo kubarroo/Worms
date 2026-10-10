@@ -1,5 +1,12 @@
 #include "Core/Input.h"
 
+void Input::Reset() noexcept
+{
+    horizontal = vertical = camera_horizontal = camera_vertical = 0.f;
+    change_worm = change_team = use_action = jump = cameraControl = false;
+    changeWeapon = 0;
+}
+
 void Input::UpdateInputsDown(const SDL_Event& ev)
 {
     switch (ev.key.keysym.scancode)

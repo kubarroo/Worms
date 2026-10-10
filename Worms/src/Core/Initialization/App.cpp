@@ -1,5 +1,6 @@
 #include "Core/Initialization/App.h"
 #include "Core/Input.h"
+#include "Core/Time.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Terminal/Terminal.h"
 #include "imgui_impl_sdl2.h"
@@ -11,14 +12,26 @@
 
 App::App() {}
 
+App::~App()
+{
+    App::Clean();
+}
+
 void App::InitWindow(const std::string& title, const int width, const int height)
 {
     if (sdlInitialized || imguiContext)
         throw std::logic_error("App is already initialized");
-    InitSDL(title, width, height);
-    InitImGui();
-
-    isRunning = true;
+    try
+    {
+        InitSDL(title, width, height);
+        InitImGui();
+        isRunning = true;
+    }
+    catch (...)
+    {
+        App::Clean();
+        throw;
+    }
 }
 
 void App::InitSDL(const std::string& title, const int width, const int height)
@@ -137,7 +150,7 @@ void App::PreRender()
     SDL_RenderClear(renderer);
 }
 
-void App::Clean()
+void App::Clean() noexcept
 {
     isRunning = false;
     if (imguiContext)
@@ -176,4 +189,7 @@ void App::Clean()
         SDL_Quit();
         sdlInitialized = false;
     }
+    toggleColliders = false;
+    Input::Get().Reset();
+    Time::ResetFrameClock();
 }

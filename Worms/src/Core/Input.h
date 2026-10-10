@@ -15,6 +15,7 @@ public:
 
     void UpdateInputsDown(const SDL_Event& ev);
     void UpdateInputsUp(const SDL_Event& ev);
+    void Reset() noexcept;
 
     float Horizontal() const
     {

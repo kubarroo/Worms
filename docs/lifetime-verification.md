@@ -17,6 +17,11 @@ Tests in `ApplicationTests/TestGameLifetime.cpp` use SDL `dummy` drivers and the
 | Partial initialization | Cleanup after failure and safe repeated `CleanUp()` |
 | Scene-local physics | Independent factories and contact registries, equal entity IDs in separate worlds, and cleanup or failed startup of one scene without invalidating another scene's physics |
 | Camera target loss | Existing timeout, a consumable signal, and one turn transition coordinated by the scene |
+| Same-scene restart | Three cycles on the same renderer, with active and pending projectiles/particles and a pending removal; restored active worm, camera zoom, weapon charge, counters, and empty queues |
+| Full startup rollback | Missing worm, weapon, map, or music assets release both gameplay and platform resources; retry succeeds without explicit cleanup |
+| Platform rollback and RAII | Renderer/audio initialization failure rolls back immediately; retry and destruction without explicit cleanup release the platform |
+| Shutdown dependency order | Objects observe detached physics callbacks but live worlds, renderer, audio device, and shared weapon texture; addition/removal requests are rejected during cleanup |
+| Session state | Held input and pending weapon change are reset; the first frame after resetting the frame clock has zero elapsed time |
 
 Repeated cycles compare available entity slots, Box2D bodies, subscriptions, and object queues. Tests also check owned particle-system and weapon textures, and the map texture and surface before and after cleanup. These checks cover selected owners; they are not a global counter of all SDL allocations or proof that no leaks exist.
 
@@ -89,3 +94,24 @@ Headless tests do not replace verification with normal audio and graphics driver
 - Interactive gameplay checks, CRT leak diagnostics, and ASan were not repeated
   for this step. Passing tests do not establish complete memory-leak freedom or
   full isolation of the still-shared input, rendering, and audio services.
+
+## Phase-2 Step-5 Verification
+
+- The Debug build of `worms` and `worms_tests` completed successfully using the
+  local `/Z7` workaround. Existing numeric-conversion warnings remain.
+- CTest passed **119/119 tests**. Eight tests were added for platform rollback
+  and destruction, input/frame-clock reset, same-scene restart, full game startup
+  rollback, rejection of duplicate startup, and shutdown dependency order.
+- After the final ownership assertions and restart checks were added, the full
+  suite passed **three shuffled iterations of 119 tests in one process**, with
+  `WORMS_CRT_DIAGNOSTICS=1` and starting seed `12345`.
+- The log at `build/debug/phase2-step5-crt.log` confirms CRT diagnostics were
+  enabled, all 357 test executions passed, and no heap-integrity failure or
+  exit-time CRT leak report was emitted. This covers the Debug CRT allocations
+  observed by this run, not all driver/GPU allocations or use-after-free risks.
+- No ASan-instrumented build or interactive gameplay verification was performed.
+  Manual checks still include firing, explosions, camera target loss, turn
+  changes, team elimination, and closing with active effects.
+- Lifecycle operations are coordinated outside active update/render calls.
+  Scene restart retains the renderer and platform, but input, frame timing,
+  and audio remain shared services rather than fully isolated per-scene state.

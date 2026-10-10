@@ -12,7 +12,7 @@ public:
     void InitWindow(const std::string& title, const int width, const int height) final;
     void Update() final;
     void Render() final;
-    void Clean() final;
+    void Clean() noexcept final;
 
 private:
     friend struct GameTestAccess;

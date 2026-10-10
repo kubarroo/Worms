@@ -1,9 +1,12 @@
 #include "Core/Initialization/App.h"
 #include "Core/ParticleSystem.h"
+#include "Core/Input.h"
+#include "Core/Time.h"
 #include "Core/Physics/ColliderFactory.h"
 #include "Core/Physics/ContactManager.h"
 #include "Game/Tags.h"
 #include "Game/Weapon/WeaponImpl.h"
+#include <SDL_mixer.h>
 #include <gtest/gtest.h>
 #include <memory>
 #include <optional>
@@ -129,7 +132,6 @@ class TestApp : public App
 public:
     bool HasWindow() const { return window != nullptr; }
     bool HasRenderer() const { return renderer != nullptr; }
-    ~TestApp() override { Clean(); }
 };
 
 TEST(CleanupSafety, UninitializedAppCanBeCleanedTwice)
@@ -160,12 +162,98 @@ TEST(CleanupSafety, AppCanBeCleanedAfterRendererInitializationFails)
     ScopedHint rendererDriver(SDL_HINT_RENDER_DRIVER, "worms-nonexistent-renderer");
     TestApp app;
     EXPECT_THROW(app.InitWindow("Test", 32, 32), SDL_Exception);
-    EXPECT_TRUE(app.HasWindow());
+    EXPECT_FALSE(app.HasWindow());
     EXPECT_FALSE(app.HasRenderer());
+    EXPECT_FALSE(app.IsRunning());
+    EXPECT_EQ(SDL_WasInit(0), 0u);
     app.Clean();
     EXPECT_NO_THROW(app.Clean());
     EXPECT_FALSE(app.HasWindow());
     EXPECT_EQ(SDL_WasInit(0), 0u);
+}
+
+TEST(CleanupSafety, FailedPlatformInitializationCanBeRetriedWithoutExplicitCleanup)
+{
+    ScopedHint video(SDL_HINT_VIDEODRIVER, "dummy");
+    ScopedHint audio(SDL_HINT_AUDIODRIVER, "dummy");
+    TestApp app;
+    {
+        ScopedHint renderer(SDL_HINT_RENDER_DRIVER, "worms-nonexistent-renderer");
+        EXPECT_THROW(app.InitWindow("Test", 32, 32), SDL_Exception);
+    }
+    ScopedHint renderer(SDL_HINT_RENDER_DRIVER, "software");
+    {
+        ScopedHint badAudio(SDL_HINT_AUDIODRIVER, "worms-nonexistent-driver");
+        EXPECT_THROW(app.InitWindow("Test", 32, 32), SDL_Exception);
+        EXPECT_FALSE(app.HasWindow());
+        EXPECT_FALSE(app.HasRenderer());
+        EXPECT_EQ(SDL_WasInit(0), 0u);
+    }
+    ASSERT_NO_THROW(app.InitWindow("Test", 32, 32));
+    EXPECT_TRUE(app.IsRunning());
+    EXPECT_TRUE(app.HasRenderer());
+    EXPECT_THROW(app.InitWindow("Test", 32, 32), std::logic_error);
+    EXPECT_TRUE(app.IsRunning());
+    EXPECT_TRUE(app.HasRenderer());
+}
+
+TEST(CleanupSafety, AppDestructorReleasesPlatformWithoutExplicitCleanup)
+{
+    ScopedHint video(SDL_HINT_VIDEODRIVER, "dummy");
+    ScopedHint audio(SDL_HINT_AUDIODRIVER, "dummy");
+    ScopedHint renderer(SDL_HINT_RENDER_DRIVER, "software");
+    {
+        App app;
+        ASSERT_NO_THROW(app.InitWindow("Test", 32, 32));
+    }
+    EXPECT_EQ(SDL_WasInit(0), 0u);
+    EXPECT_EQ(ImGui::GetCurrentContext(), nullptr);
+    EXPECT_EQ(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+}
+
+TEST(CleanupSafety, InputResetClearsAxesHeldActionsAndPendingWeaponChange)
+{
+    auto& input = Input::Get();
+    input.Reset();
+    SDL_Event event{};
+    for (auto key : {SDL_SCANCODE_D, SDL_SCANCODE_W, SDL_SCANCODE_UP,
+                     SDL_SCANCODE_RIGHT, SDL_SCANCODE_SPACE, SDL_SCANCODE_LSHIFT,
+                     SDL_SCANCODE_E})
+    {
+        event.key.keysym.scancode = key;
+        input.UpdateInputsDown(event);
+    }
+    EXPECT_TRUE(input.Jump());
+    EXPECT_TRUE(input.UseAction());
+    EXPECT_TRUE(input.CameraControll());
+    input.Reset();
+    EXPECT_FLOAT_EQ(input.Horizontal(), 0.f);
+    EXPECT_FLOAT_EQ(input.Vertical(), 0.f);
+    EXPECT_FLOAT_EQ(input.CameraHorizontal(), 0.f);
+    EXPECT_FLOAT_EQ(input.CameraVertical(), 0.f);
+    EXPECT_FALSE(input.Jump());
+    EXPECT_FALSE(input.UseAction());
+    EXPECT_FALSE(input.CameraControll());
+    EXPECT_FALSE(input.ChangeWorm());
+    EXPECT_FALSE(input.ChangeTeam());
+    EXPECT_EQ(input.ChangeWeapon(), 0);
+}
+
+TEST(CleanupSafety, FrameClockStartsAtZeroAfterReset)
+{
+    ASSERT_EQ(SDL_Init(SDL_INIT_TIMER), 0);
+    Time::ResetFrameClock();
+    Time::UpdateFrameTime();
+    EXPECT_DOUBLE_EQ(Time::deltaTime, 0.0);
+    SDL_Delay(20);
+    Time::UpdateFrameTime();
+    EXPECT_GE(Time::deltaTime, 0.02);
+    Time::ResetFrameClock();
+    SDL_Delay(20);
+    Time::UpdateFrameTime();
+    EXPECT_DOUBLE_EQ(Time::deltaTime, 0.0);
+    Time::ResetFrameClock();
+    SDL_Quit();
 }
 
 TEST(CleanupSafety, NegativeParticleCountIsRejectedBeforeCreatingEntities)

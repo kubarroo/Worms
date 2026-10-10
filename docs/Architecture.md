@@ -63,10 +63,52 @@ configuration. Managers advance spawn slots only after an entire team succeeds
 and reset the slot counter during cleanup; failed initialization does not shift
 positions or affect subsequent scene starts.
 
-Scene cleanup disconnects physics callbacks, cleans teams while camera and
-weapon still exist, then cleans scene objects. Shared weapon resources outlive
-their borrowers. The ECS and physics worlds are released last. A failed startup
-object remains owned until dependent managers have been cleaned and destroyed.
+Scene cleanup follows this order:
+
+1. Disable updates and reject new addition/removal requests; stop audio playback.
+2. Detach the Box2D contact listener and debug draw.
+3. Clean teams while the camera and weapon still exist.
+4. Clean the failed startup object, active objects, and pending additions.
+   Pending additions are discarded without being initialized.
+5. Consume deferred contact errors and clear collision subscriptions.
+6. Destroy the worm manager, clear removal requests, and destroy scene objects.
+7. Release shared weapon resources, music, debug draw, and the retained failed
+   startup object, then the context, factory, physics world, contact manager,
+   and ECS world.
+
+Shared weapon resources outlive their borrowers, and the renderer remains
+available throughout scene cleanup. A failed startup object remains owned until
+dependent managers have been cleaned and destroyed. Cleanup is idempotent and
+`noexcept`; individual object cleanup failures are logged without stopping the
+release of remaining resources. Custom cleanup implementations must still
+release their resources correctly; catching an exception cannot repair their
+internal ownership mistakes.
+
+`Game::Clean()` destroys its scene before `App::Clean()` shuts down the ImGui
+renderer backend, platform backend, and context, then audio, renderer, window,
+and SDL. Both cleanup entry points are `noexcept` and safe to call repeatedly.
+The `Game` destructor releases gameplay first; the `App` destructor also releases
+platform resources when no explicit cleanup was performed.
+
+## Rollback And Restart
+
+`App::InitWindow()` rolls back acquired platform resources on initialization
+failure. `Game::InitWindow()` also releases the platform when scene creation or
+initialization fails. Both preserve the original exception and permit a retry
+on the same instance without an intermediate `Clean()` call. Rejecting a second
+initialization of an already running instance does not tear down that instance.
+
+The same `GameScene` can be initialized again after `CleanUp()`, using the same
+live renderer. Each initialization creates new worlds, managers, camera, weapon,
+and teams. Successful scene initialization resets shared input state and the
+frame clock; application cleanup resets them too. A failed scene initialization
+does not reset the input or frame clock of another running scene.
+
+The application loop calls `Time::UpdateFrameTime()`. The first call after
+`Time::ResetFrameClock()` yields zero elapsed time, excluding startup/restart
+delays from simulation. Independent `Time::Timer` instances still measure
+camera and projectile timeouts. Tests and external scene drivers may set
+`Time::deltaTime` explicitly instead.
 
 ## Camera And Turn Coordination
 
@@ -90,4 +132,7 @@ services, and a fixture cannot be created through a factory for another world.
 
 This is physics isolation, not full parallel-scene support: input, frame timing,
 the renderer, and SDL_mixer playback are still shared. In particular, scene
-startup and cleanup can affect global audio playback.
+startup and cleanup can affect global audio playback, and successful scene
+startup resets shared input and frame timing. Application cleanup resets both
+as well. Scene lifecycle operations must be coordinated by the owner outside
+active update/render calls; cleanup is not an interrupt of an executing frame.

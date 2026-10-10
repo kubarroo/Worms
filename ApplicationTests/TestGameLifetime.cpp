@@ -13,6 +13,7 @@
 #include "Game/Weapon/WeaponManager.h"
 #include <SDL_mixer.h>
 #include <box2d/b2_circle_shape.h>
+#include <box2d/b2_contact_manager.h>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <memory>
@@ -29,7 +30,11 @@ static_assert(!std::is_copy_constructible_v<Music>);
 static_assert(!std::is_copy_assignable_v<Music>);
 static_assert(!std::is_copy_constructible_v<GameScene>);
 static_assert(!std::is_move_constructible_v<GameScene>);
+static_assert(!std::is_copy_constructible_v<App>);
+static_assert(!std::is_move_constructible_v<App>);
 static_assert(noexcept(std::declval<GameScene&>().CleanUp()));
+static_assert(noexcept(std::declval<App&>().Clean()));
+static_assert(noexcept(std::declval<Game&>().Clean()));
 
 struct GameTestAccess
 {
@@ -58,6 +63,7 @@ struct GameTestAccess
     {
         return game.scene->wormManager->GetActiveWormId();
     }
+    static void ChangeTurn(Game& game) { game.scene->wormManager->OnCameraTargetLost(); }
     static std::span<const std::unique_ptr<GameObject>> Objects(const Game& game)
     {
         if (!game.scene) return {};
@@ -586,6 +592,153 @@ TEST_F(GameLifetime, FailedSceneInitializationRollsBackAndCanBeRetried)
     scene.CleanUp();
     EXPECT_FALSE(GameTestAccess::HasResources(scene));
     EXPECT_NO_THROW(scene.CleanUp());
+}
+
+TEST_F(GameLifetime, SameSceneRestartsWithPendingEffectsAndResetsSessionState)
+{
+    auto& scene = game.Scene();
+    auto* renderer = game.Renderer();
+    const auto subscriptions = GameTestAccess::SubscriptionCount(scene);
+    const auto firstWorm = GameTestAccess::ActiveWorm(game);
+    for (int cycle = 0; cycle < 3; ++cycle)
+    {
+        SCOPED_TRACE(cycle);
+        GameTestAccess::ChangeTurn(game);
+        EXPECT_NE(GameTestAccess::ActiveWorm(game), firstWorm);
+        for (const auto& object : game.Objects())
+        {
+            if (auto* currentCamera = dynamic_cast<Camera*>(object.get()))
+                currentCamera->ChangeZoom(2.f);
+            if (auto* currentWeapon = dynamic_cast<Weapon*>(object.get()))
+                WeaponTestAccess::SetCharge(*currentWeapon);
+        }
+        auto projectile = std::make_unique<Projectile>(100.f, 100.f, 0.f, 0.f);
+        auto& activeProjectile = scene.AddObject(std::move(projectile));
+        scene.AddObject(std::make_unique<ParticleSystem>("blood.png", 1.f, 0.f, 0.f, 4));
+        scene.QueueAdd(std::make_unique<Projectile>(100.f, 100.f, 0.f, 0.f));
+        scene.QueueAdd(std::make_unique<ParticleSystem>("blood.png", 1.f, 0.f, 0.f, 2));
+        scene.RequestDestroy(activeProjectile);
+        SDL_Event key{};
+        for (auto code : {SDL_SCANCODE_D, SDL_SCANCODE_SPACE, SDL_SCANCODE_LSHIFT,
+                          SDL_SCANCODE_RIGHT, SDL_SCANCODE_E})
+        {
+            key.key.keysym.scancode = code;
+            Input::Get().UpdateInputsDown(key);
+        }
+        Time::deltaTime = 99.0;
+        scene.CleanUp();
+        EXPECT_FALSE(GameTestAccess::HasResources(scene));
+        EXPECT_THROW(scene.Context(), std::logic_error);
+        EXPECT_NO_THROW(scene.CleanUp());
+        EXPECT_NO_THROW(scene.Update());
+        EXPECT_NO_THROW(scene.Render());
+        EXPECT_EQ(game.Renderer(), renderer);
+        EXPECT_EQ(SDL_RenderClear(renderer), 0);
+        EXPECT_NE(ImGui::GetCurrentContext(), nullptr);
+        EXPECT_NE(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+        ASSERT_NO_THROW(scene.Initialize());
+        EXPECT_DOUBLE_EQ(Time::deltaTime, 0.0);
+        Time::UpdateFrameTime();
+        EXPECT_DOUBLE_EQ(Time::deltaTime, 0.0);
+        EXPECT_FLOAT_EQ(Input::Get().Horizontal(), 0.f);
+        EXPECT_FLOAT_EQ(Input::Get().CameraHorizontal(), 0.f);
+        EXPECT_FALSE(Input::Get().Jump());
+        EXPECT_FALSE(Input::Get().UseAction());
+        EXPECT_FALSE(Input::Get().CameraControll());
+        EXPECT_EQ(Input::Get().ChangeWeapon(), 0);
+        EXPECT_EQ(GameTestAccess::ActiveWorm(game), firstWorm);
+        for (const auto& object : game.Objects())
+        {
+            if (auto* newCamera = dynamic_cast<Camera*>(object.get()))
+            {
+                EXPECT_FLOAT_EQ(newCamera->Zoom(), 1.f);
+                EXPECT_FALSE(newCamera->ConsumeTargetLost());
+            }
+            if (auto* newWeapon = dynamic_cast<Weapon*>(object.get()))
+                EXPECT_FLOAT_EQ(WeaponTestAccess::Charge(*newWeapon), 0.f);
+        }
+        EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+        EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+        EXPECT_EQ(GameTestAccess::SubscriptionCount(scene), subscriptions);
+        EXPECT_EQ(game.PendingAddCount(), 0);
+        EXPECT_EQ(game.PendingRemovalCount(), 0);
+        EXPECT_NO_THROW(scene.Update());
+        EXPECT_NO_THROW(scene.Render());
+    }
+}
+
+TEST_F(GameLifetime, FailedGameStartupRollsBackPlatformAndCanBeRetried)
+{
+    const auto subscriptions = GameTestAccess::SubscriptionCount(game);
+    game.Clean();
+    for (const auto* missing : {"worms.png", "powerBar.png", "map.png", "Rick_Roll.ogg"})
+    {
+        SCOPED_TRACE(missing);
+        {
+            SceneAssetsWithout assets(missing);
+            ScopedWorkingDirectory directory(assets.Directory());
+            EXPECT_THROW(game.InitWindow("Failed startup", 800, 600), SDL_Exception);
+        }
+        EXPECT_FALSE(game.HasResources());
+        EXPECT_FALSE(game.IsRunning());
+        EXPECT_EQ(SDL_WasInit(0), 0u);
+        EXPECT_EQ(ImGui::GetCurrentContext(), nullptr);
+        EXPECT_EQ(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+        EXPECT_EQ(game.PendingAddCount(), 0);
+        EXPECT_EQ(game.PendingRemovalCount(), 0);
+        ASSERT_NO_THROW(game.InitWindow("Retry startup", 800, 600));
+        EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+        EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+        EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
+        EXPECT_NO_THROW(game.Update());
+        EXPECT_NO_THROW(game.Render());
+        game.Clean();
+    }
+}
+
+TEST_F(GameLifetime, RejectedGameInitializationPreservesRunningSession)
+{
+    auto* renderer = game.Renderer();
+    auto* scene = &game.Scene();
+    EXPECT_THROW(game.InitWindow("Duplicate startup", 800, 600), std::logic_error);
+    EXPECT_EQ(game.Renderer(), renderer);
+    EXPECT_EQ(&game.Scene(), scene);
+    EXPECT_TRUE(game.IsRunning());
+    EXPECT_NO_THROW(game.Update());
+    EXPECT_NO_THROW(game.Render());
+}
+
+TEST_F(GameLifetime, CleanupKeepsWorldsRendererAndSharedTexturesAliveForObjects)
+{
+    auto* texture = game.Registry().GetComponent<Sprite>(weapon->GetId()).texture;
+    ASSERT_NE(texture, nullptr);
+    auto& scene = game.Scene();
+    const auto context = game.Context();
+    auto stats = std::make_shared<QueueProbeStats>();
+    auto pendingStats = std::make_shared<QueueProbeStats>();
+    auto probe = std::make_unique<QueueProbe>(stats);
+    probe->onCleanup = [&](QueueProbe& object)
+    {
+        EXPECT_THROW(scene.Context(), std::logic_error);
+        EXPECT_EQ(context.physics.GetContactManager().m_contactListener, nullptr);
+        EXPECT_EQ(SDL_QueryTexture(texture, nullptr, nullptr, nullptr, nullptr), 0);
+        EXPECT_EQ(SDL_RenderClear(context.renderer), 0);
+        EXPECT_NE(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+        auto id = context.world.CreateEntity();
+        context.world.DestroyEntity(id);
+        EXPECT_THROW(object.Owner().QueueAdd(std::make_unique<QueueProbe>(pendingStats)),
+                     std::logic_error);
+        EXPECT_THROW(object.Owner().RequestDestroy(object), std::logic_error);
+    };
+    game.AddObject(std::move(probe));
+    game.QueueAdd(std::make_unique<QueueProbe>(pendingStats));
+    game.Clean();
+    EXPECT_EQ(stats->cleaned, 1);
+    EXPECT_EQ(stats->destroyed, 1);
+    EXPECT_EQ(pendingStats->initialized, 0);
+    EXPECT_EQ(pendingStats->cleaned, 2);
+    EXPECT_EQ(pendingStats->destroyed, 2);
+    EXPECT_FALSE(game.HasResources());
 }
 
 TEST_F(GameLifetime, GameplayConstructorsDoNotAllocateEntitiesBodiesOrSubscriptions)

@@ -3,6 +3,7 @@
 #include "Core/Audio/Music.h"
 #include "Core/Camera/Camera.h"
 #include "Core/GameObject.h"
+#include "Core/Input.h"
 #include "Core/Physics/b2ColliderDraw.h"
 #include "ECS/World.h"
 #include "Game/Components.h"
@@ -138,6 +139,8 @@ void GameScene::Initialize()
 
         music = std::make_unique<Music>("Rick_Roll.ogg");
         music->Play();
+        Input::Get().Reset();
+        Time::ResetFrameClock();
         initialized = true;
     }
     catch (...)
