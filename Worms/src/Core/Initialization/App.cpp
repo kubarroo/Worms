@@ -1,8 +1,6 @@
 #include "Core/Initialization/App.h"
 #include "Core/Input.h"
-#include "Core/Physics/ColliderFactory.h"
-#include "Core/Physics/ContactManager.h"
-#include "Core/Time.h"
+#include "ExceptionHandling/SDL_Exception.h"
 #include "Terminal/Terminal.h"
 #include "imgui_impl_sdl2.h"
 #include <SDL2/SDL.h>
@@ -77,7 +75,6 @@ void App::InitImGui()
 void App::Update()
 {
     Terminal::Get().Update();
-    ContactManager::Get().Update();
 }
 
 void App::HandleEvents()
@@ -105,8 +102,6 @@ void App::Render() {}
 
 void App::PostRender()
 {
-    if (toggleColliders)
-        physicsWorld->DebugDraw();
     ImGui::SetNextWindowPos(ImVec2(0.0f, ImGui::GetIO().DisplaySize.y - 200));
     ImGui::SetNextWindowSize({ImGui::GetIO().DisplaySize.x, 200});
     ImGui::SetNextWindowBgAlpha(1.f);

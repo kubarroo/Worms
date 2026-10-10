@@ -1,6 +1,7 @@
 #include "Core/Initialization/App.h"
 #include "Core/ParticleSystem.h"
 #include "Core/Physics/ContactManager.h"
+#include "Game/Tags.h"
 #include "Game/Weapon/WeaponImpl.h"
 #include <gtest/gtest.h>
 #include <optional>

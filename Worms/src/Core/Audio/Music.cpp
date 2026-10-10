@@ -1,12 +1,10 @@
 #include "Music.h"
-#include "Terminal/Terminal.h"
+#include "ExceptionHandling/SDL_Exception.h"
 
 Music::Music(const std::string& fileName)
 {
     music = Mix_LoadMUS(fileName.c_str());
-    if (music == NULL)
-        Terminal::Get().Log("Coudn't load \"" + fileName + "\" as music obj \n" + SDL_GetError(),
-                            LogLevel::ERROR);
+    SDL_CHECK(music);
 }
 
 void Music::Play(unsigned int times)

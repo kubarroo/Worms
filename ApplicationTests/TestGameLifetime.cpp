@@ -1,15 +1,20 @@
 #include "Core/Audio/Music.h"
 #include "Core/Audio/Sound.h"
 #include "Core/ParticleSystem.h"
+#include "Core/Time.h"
 #include "Core/Physics/ColliderFactory.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Game.h"
+#include "Game/GameScene.h"
+#include "Game/Map/Map.h"
+#include "Game/Player/WormManager.h"
 #include "Game/Player/WormTeam.h"
 #include "Game/Weapon/Projectile.h"
 #include <SDL_mixer.h>
 #include <box2d/b2_circle_shape.h>
 #include <gtest/gtest.h>
 #include <memory>
+#include <filesystem>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -19,6 +24,24 @@ static_assert(!std::is_copy_constructible_v<Sound>);
 static_assert(!std::is_copy_assignable_v<Sound>);
 static_assert(!std::is_copy_constructible_v<Music>);
 static_assert(!std::is_copy_assignable_v<Music>);
+static_assert(!std::is_copy_constructible_v<GameScene>);
+static_assert(!std::is_move_constructible_v<GameScene>);
+static_assert(noexcept(std::declval<GameScene&>().CleanUp()));
+
+struct GameTestAccess
+{
+    static World& Registry(Game& game) { return *game.scene->world; }
+    static b2World& Physics(Game& game) { return *game.scene->physicsWorld; }
+    static bool HasScene(const Game& game) { return static_cast<bool>(game.scene); }
+    static void ResetScene(Game& game) { game.scene.reset(); }
+    static World& Registry(GameScene& scene) { return *scene.world; }
+    static b2World& Physics(GameScene& scene) { return *scene.physicsWorld; }
+    static bool HasResources(const GameScene& scene)
+    {
+        return scene.world || scene.physicsWorld || scene.b2DebugDraw ||
+               scene.wormManager || scene.weaponManager || scene.music || scene.ownsRuntime;
+    }
+};
 
 struct MapTestAccess
 {
@@ -86,6 +109,60 @@ private:
     double previous;
 };
 
+class ScopedWorkingDirectory
+{
+public:
+    explicit ScopedWorkingDirectory(const std::filesystem::path& path)
+        : previous(std::filesystem::current_path())
+    {
+        std::filesystem::current_path(path);
+    }
+    ~ScopedWorkingDirectory()
+    {
+        std::error_code error;
+        std::filesystem::current_path(previous, error);
+    }
+private:
+    std::filesystem::path previous;
+};
+
+class SceneAssetsWithoutMusic
+{
+public:
+    SceneAssetsWithoutMusic()
+        : path(std::filesystem::temp_directory_path() /
+               ("worms-scene-assets-" + std::to_string(SDL_GetPerformanceCounter())))
+    {
+        std::filesystem::create_directory(path);
+        try
+        {
+            for (const auto& entry :
+                 std::filesystem::directory_iterator(std::filesystem::current_path()))
+            {
+                const auto extension = entry.path().extension();
+                if (entry.is_regular_file() && (extension == ".png" || extension == ".wav"))
+                    std::filesystem::copy_file(entry.path(), path / entry.path().filename());
+            }
+        }
+        catch (...)
+        {
+            Remove();
+            throw;
+        }
+    }
+    ~SceneAssetsWithoutMusic() { Remove(); }
+    const std::filesystem::path& Directory() const { return path; }
+    SceneAssetsWithoutMusic(const SceneAssetsWithoutMusic&) = delete;
+    SceneAssetsWithoutMusic& operator=(const SceneAssetsWithoutMusic&) = delete;
+private:
+    void Remove() noexcept
+    {
+        std::error_code error;
+        std::filesystem::remove_all(path, error);
+    }
+    std::filesystem::path path;
+};
+
 std::size_t CountOpaquePixels(SDL_Surface* surface)
 {
     Sdl::SurfaceLock lock(surface);
@@ -125,10 +202,10 @@ private:
 class InspectableGame : public Game
 {
 public:
-    World& Registry() { return *world; }
-    b2World& Physics() { return *physicsWorld; }
+    World& Registry() { return GameTestAccess::Registry(*this); }
+    b2World& Physics() { return GameTestAccess::Physics(*this); }
     SDL_Renderer* Renderer() { return renderer; }
-    bool HasResources() const { return world || physicsWorld || renderer || window; }
+    bool HasResources() const { return GameTestAccess::HasScene(*this) || renderer || window; }
 };
 
 class TrackedWorm : public Worm
@@ -229,6 +306,168 @@ protected:
     uint16_t initialEntities = 0;
     int initialBodies = 0;
 };
+
+TEST_F(GameLifetime, RejectedSecondSceneDoesNotCleanTheRunningScene)
+{
+    const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
+    {
+        GameScene second(game.Renderer());
+        EXPECT_THROW(second.Initialize(), std::logic_error);
+        EXPECT_NO_THROW(second.CleanUp());
+    }
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+    EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+    EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
+    EXPECT_NO_THROW(game.Update());
+}
+
+TEST_F(GameLifetime, SceneDestructionReleasesGameplayButKeepsPlatformAlive)
+{
+    const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
+    GameTestAccess::ResetScene(game);
+    EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), 0);
+    EXPECT_TRUE(GameObject::activeObjs.empty());
+    EXPECT_NE(SDL_WasInit(SDL_INIT_VIDEO), 0);
+    EXPECT_NE(ImGui::GetCurrentContext(), nullptr);
+    EXPECT_NE(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+    for (int cycle = 0; cycle < 3; ++cycle)
+    {
+        SCOPED_TRACE(cycle);
+        {
+            GameScene scene(game.Renderer());
+            scene.Initialize();
+            EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
+            EXPECT_THROW(scene.Initialize(), std::logic_error);
+            EXPECT_NO_THROW(scene.Update());
+            EXPECT_NO_THROW(scene.Render());
+            EXPECT_NO_THROW(scene.RenderDebug());
+            GameObject::objsToAdd.emplace_back(
+                std::make_unique<ParticleSystem>("blood.png", 1, 0, 0, 2));
+        }
+        EXPECT_TRUE(GameObject::activeObjs.empty());
+        EXPECT_TRUE(GameObject::objsToAdd.empty());
+        EXPECT_TRUE(GameObject::objsToDelete.empty());
+        EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), 0);
+        EXPECT_EQ(SDL_RenderClear(game.Renderer()), 0);
+    }
+}
+
+TEST_F(GameLifetime, FailedSceneInitializationRollsBackAndCanBeRetried)
+{
+    const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
+    GameTestAccess::ResetScene(game);
+    GameScene scene(game.Renderer());
+    {
+        // The project root has no gameplay assets, so initialization fails after physics setup.
+        ScopedWorkingDirectory directory(std::filesystem::current_path().parent_path());
+        EXPECT_THROW(scene.Initialize(), SDL_Exception);
+    }
+    EXPECT_FALSE(GameTestAccess::HasResources(scene));
+    EXPECT_TRUE(GameObject::activeObjs.empty());
+    EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), 0);
+    EXPECT_NO_THROW(scene.CleanUp());
+    EXPECT_NO_THROW(scene.Update());
+    EXPECT_NO_THROW(scene.Render());
+    EXPECT_NO_THROW(scene.RenderDebug());
+    ASSERT_NO_THROW(scene.Initialize());
+    EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
+    scene.CleanUp();
+    EXPECT_FALSE(GameTestAccess::HasResources(scene));
+    EXPECT_NO_THROW(scene.CleanUp());
+}
+
+TEST_F(GameLifetime, FramePresentationAndColliderDebugStillWork)
+{
+    game.PreRender();
+    EXPECT_NO_THROW(game.Render());
+    EXPECT_NO_THROW(game.PostRender());
+}
+
+TEST_F(GameLifetime, CleanupExceptionsDoNotStopSceneDestructionOrNextSceneStartup)
+{
+    struct CleanupObject : GameObject
+    {
+        CleanupObject(int failure, int& cleaned, int& destroyed)
+            : failure(failure), cleaned(cleaned), destroyed(destroyed) {}
+        void CleanUp() override
+        {
+            ++cleaned;
+            if (failure == 1) throw std::runtime_error("Cleanup failure");
+            if (failure == 2) throw 42;
+            GameObject::CleanUp();
+        }
+        ~CleanupObject() override { ++destroyed; }
+        int failure;
+        int& cleaned;
+        int& destroyed;
+    };
+
+    const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
+    int cleaned = 0;
+    int destroyed = 0;
+    for (int failure : {1, 0})
+    {
+        auto object = std::make_unique<CleanupObject>(failure, cleaned, destroyed);
+        object->Initialise(game.Renderer(), &game.Registry());
+        GameObject::activeObjs.emplace_back(std::move(object));
+    }
+    for (int failure : {2, 0})
+        GameObject::objsToAdd.emplace_back(
+            std::make_unique<CleanupObject>(failure, cleaned, destroyed));
+
+    EXPECT_NO_THROW(GameTestAccess::ResetScene(game));
+    EXPECT_EQ(cleaned, 4);
+    EXPECT_EQ(destroyed, 4);
+    EXPECT_TRUE(GameObject::activeObjs.empty());
+    EXPECT_TRUE(GameObject::objsToAdd.empty());
+    EXPECT_TRUE(GameObject::objsToDelete.empty());
+    EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), 0);
+    EXPECT_FALSE(ContactManager::Get().TakePendingException());
+    EXPECT_EQ(SDL_RenderClear(game.Renderer()), 0);
+
+    GameScene next(game.Renderer());
+    ASSERT_NO_THROW(next.Initialize());
+    EXPECT_EQ(GameTestAccess::Registry(next).GetAmountOfAvailableEntities(), initialEntities);
+    EXPECT_EQ(GameTestAccess::Physics(next).GetBodyCount(), initialBodies);
+    EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
+}
+
+TEST_F(GameLifetime, MissingMusicRollsBackFullyConstructedGameplayAndAllowsRetry)
+{
+    const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
+    GameTestAccess::ResetScene(game);
+    GameScene scene(game.Renderer());
+    SceneAssetsWithoutMusic assets;
+    {
+        ScopedWorkingDirectory directory(assets.Directory());
+        try
+        {
+            scene.Initialize();
+            FAIL() << "Missing music should fail scene initialization";
+        }
+        catch (const SDL_Exception& error)
+        {
+            // Music is loaded only after teams, map, camera and weapon assets are ready.
+            EXPECT_EQ(std::filesystem::path(error.GetFile()).filename(), "Music.cpp");
+        }
+    }
+    EXPECT_FALSE(GameTestAccess::HasResources(scene));
+    EXPECT_TRUE(GameObject::activeObjs.empty());
+    EXPECT_TRUE(GameObject::objsToAdd.empty());
+    EXPECT_TRUE(GameObject::objsToDelete.empty());
+    EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), 0);
+    EXPECT_FALSE(ContactManager::Get().TakePendingException());
+    EXPECT_EQ(Mix_PlayingMusic(), 0);
+    EXPECT_EQ(SDL_RenderClear(game.Renderer()), 0);
+    EXPECT_NO_THROW(scene.CleanUp());
+
+    ASSERT_NO_THROW(scene.Initialize());
+    EXPECT_EQ(GameTestAccess::Registry(scene).GetAmountOfAvailableEntities(), initialEntities);
+    EXPECT_EQ(GameTestAccess::Physics(scene).GetBodyCount(), initialBodies);
+    EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
+    EXPECT_NO_THROW(scene.CleanUp());
+    EXPECT_FALSE(GameTestAccess::HasResources(scene));
+}
 
 TEST_F(GameLifetime, RemovingActiveWormSelectsSuccessorAndReleasesItsResources)
 {
