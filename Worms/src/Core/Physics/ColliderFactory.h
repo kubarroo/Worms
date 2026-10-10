@@ -12,6 +12,7 @@ public:
     ColliderFactory(ColliderFactory&&) = delete;
 
     void Init(b2World* physicsWorld);
+    bool HasPhysicsWorld() const noexcept { return physicsWorld != nullptr; }
 
     static ColliderFactory& Get()
     {

@@ -1,4 +1,5 @@
 #include "ParticleSystem.h"
+#include "Game/GameScene.h"
 #include <stdexcept>
 
 ParticleSystem::ParticleSystem(std::string particleImg, float startScale, float startPosX,
@@ -40,7 +41,7 @@ void ParticleSystem::Update()
         return;
     }
 
-    GameObject::objsToDelete.push_back(this);
+    Scene().RequestDestroy(*this);
 }
 
 void ParticleSystem::Initialise(SDL_Renderer* newRenderer, World* newWorld)

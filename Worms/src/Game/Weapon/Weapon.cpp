@@ -4,6 +4,7 @@
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Tags.h"
 #include "Game/Weapon/Weapon.h"
+#include "Game/GameScene.h"
 #include "SDL_image.h"
 
 Weapon::Weapon( Camera& camera ) : camera( camera )
@@ -81,12 +82,11 @@ void Weapon::Update()
 		{
 			canShoot = false;
 			if ( shootingSound ) shootingSound->Play();
-			GameObject::objsToAdd.emplace_back(
-				std::make_unique<Projectile>( pos.x + 0.5f * cosf( rot.degree * static_cast<float>(M_PI) / 180 ),
+            auto projectile = std::make_unique<Projectile>( pos.x + 0.5f * cosf( rot.degree * static_cast<float>(M_PI) / 180 ),
 				pos.y + 0.5f * sinf( rot.degree * static_cast<float>(M_PI) / 180 ),
 				force * cosf( rot.degree * static_cast<float>(M_PI) / 180 ),
-				force * sinf( rot.degree * static_cast<float>(M_PI) / 180 ) ) );
-			Projectile* proc = dynamic_cast<Projectile*>(GameObject::objsToAdd.back().get());
+                force * sinf( rot.degree * static_cast<float>(M_PI) / 180 ) );
+            auto* proc = projectile.get();
 			proc->SetGravityScale( weaponParams.gravityScale );
 			proc->SetMaxSpeed( weaponParams.maxSpeed );
 			proc->SetBaseDamage( weaponParams.baseDamage );
@@ -97,6 +97,7 @@ void Weapon::Update()
 			proc->SetExplosionSound( explosionSound );
 			proc->SetCamera( &camera );
 			proc->SetBounciness( weaponParams.bounciness );
+            Scene().QueueAdd(std::move(projectile));
 		}
 		force = 0;
 	}

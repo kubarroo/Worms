@@ -16,7 +16,7 @@ class Worm : public GameObject
 public:
     using TexturePtr = Sdl::TexturePtr;
     Worm(SDL_Renderer* newRenderer, World* newWorld, b2World* physicsWorld, const Camera& camera,
-         SDL_Texture* texture);
+         SDL_Texture* texture, GameScene* scene = nullptr);
     void Update(std::vector<Worm*>& wormsToDelete);
     void Jump();
     void CleanUp() override;

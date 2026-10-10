@@ -50,9 +50,9 @@ SDL_Texture* createTexture(int team, SDL_Renderer* renderer)
 };
 
 WormManager::WormManager(SDL_Renderer* renderer, World* world, b2World* physicsWorld,
-                         Camera& camera, Weapon& weapon)
+                         Camera& camera, Weapon& weapon, GameScene* scene)
     : renderer(renderer), world(world), teams(), physicsWorld(physicsWorld), camera(camera),
-      weapon(weapon)
+      weapon(weapon), scene(scene)
 {
     camera.noTargetEvent = [&]()
     {
@@ -93,7 +93,7 @@ void WormManager::CreateTeam(int size)
         for (int i = 0; i < size; ++i)
         {
             newTeam->AddWorm(std::make_unique<Worm>(renderer, world, physicsWorld, camera,
-                                                    newTeam->GetHealthBarTexture()));
+                                                    newTeam->GetHealthBarTexture(), scene));
         }
 
         teams.push_back(std::move(newTeam));

@@ -5,6 +5,7 @@
 #include <box2d/b2_world.h>
 #include <SDL_image.h>
 #include "Core/ParticleSystem.h"
+#include "Game/GameScene.h"
 #include "Core/Physics/ColliderFactory.h"
 #include "Core/Physics/ContactManager.h"
 #include "ExceptionHandling/SDL_Exception.h"
@@ -24,7 +25,7 @@ void Projectile::Update()
 	{
 		createSensor = false;
 		if ( explosionSound ) explosionSound->Play();
-		GameObject::objsToAdd.emplace_back( std::make_unique<ParticleSystem>( "particle.png", params.explosionRadius * 3.f, pos.x, pos.y, 100 ) );
+        Scene().QueueAdd(std::make_unique<ParticleSystem>("particle.png", params.explosionRadius * 3.f, pos.x, pos.y, 100));
 
 		world->GetComponent<RigidBody>( objectId ).body->SetAwake( true );
 		sensorInfo.id = objectId;
@@ -32,7 +33,7 @@ void Projectile::Update()
 		b2CircleShape shape;
 		shape.m_radius = params.explosionRadius;
 		fixture = ColliderFactory::Get().CreateTriggerFixture( collider->GetBody(), &shape, sensorInfo );
-		GameObject::objsToDelete.emplace_back( this );
+        Scene().RequestDestroy(*this);
 	}
 }
 

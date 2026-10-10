@@ -5,11 +5,12 @@
 #include <stdexcept>
 #include <vector>
 
+class GameScene;
 
 class GameObject
 {
 public:
-    GameObject() = default;
+    explicit GameObject(GameScene* scene = nullptr) : scene(scene) {}
     GameObject(const GameObject&) = delete;
     GameObject& operator=(const GameObject&) = delete;
     GameObject(GameObject&&) = delete;
@@ -34,15 +35,16 @@ public:
         return hasEntity;
     }
 
-    static std::vector<std::unique_ptr<GameObject>> activeObjs;
-    static std::vector<std::unique_ptr<GameObject>> objsToAdd;
-    static std::vector<GameObject*> objsToDelete;
-
     virtual ~GameObject() = default;
 
 protected:
+    GameScene& Scene() const;
     EntityId objectId{};
     bool hasEntity = false;
     World* world = nullptr;
     SDL_Renderer* renderer = nullptr;
+
+private:
+    friend class GameScene;
+    GameScene* scene = nullptr;
 };

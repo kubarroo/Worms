@@ -8,7 +8,7 @@ class WormManager
 {
 public:
     WormManager(SDL_Renderer* renderer, World* world, b2World* physicsWorld, Camera& camera,
-                Weapon& weapon);
+                Weapon& weapon, GameScene* scene = nullptr);
     WormManager(const WormManager&) = delete;
     WormManager(WormManager&&) = delete;
 
@@ -44,4 +44,5 @@ private:
     b2World* physicsWorld;
     Camera& camera;
     Weapon& weapon;
+    GameScene* scene;
 };

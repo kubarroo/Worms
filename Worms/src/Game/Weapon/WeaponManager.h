@@ -12,12 +12,7 @@
 class WeaponManager
 {
 public:
-	WeaponManager( SDL_Renderer* renderer, Camera& camera ) : renderer( renderer )
-	{
-		auto weapon = std::make_unique<Weapon>( camera );
-		this->weapon = weapon.get();
-		GameObject::activeObjs.emplace_back( std::move( weapon ) );
-	}
+    WeaponManager(SDL_Renderer* renderer, Camera& camera, GameScene& scene);
 
 	void Initialise();
 	void Update();

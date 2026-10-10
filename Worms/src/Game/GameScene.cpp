@@ -23,6 +23,22 @@
 
 namespace
 {
+class ScopedFrame
+{
+public:
+    explicit ScopedFrame(bool& flag) : flag(flag)
+    {
+        flag = true;
+    }
+    ~ScopedFrame()
+    {
+        flag = false;
+    }
+
+private:
+    bool& flag;
+};
+
 void ReportCleanupError(const char* operation, std::exception_ptr error) noexcept
 {
     if (!error)
@@ -35,8 +51,7 @@ void ReportCleanupError(const char* operation, std::exception_ptr error) noexcep
         }
         catch (const std::exception& exception)
         {
-            Terminal::Get().Log(std::string(operation) + ": " + exception.what(),
-                                ERROR);
+            Terminal::Get().Log(std::string(operation) + ": " + exception.what(), ERROR);
         }
         catch (...)
         {
@@ -48,8 +63,7 @@ void ReportCleanupError(const char* operation, std::exception_ptr error) noexcep
     } // Logging must not interrupt resource cleanup.
 }
 
-template <typename Cleanup>
-void TryCleanup(const char* operation, Cleanup&& cleanup) noexcept
+template <typename Cleanup> void TryCleanup(const char* operation, Cleanup&& cleanup) noexcept
 {
     try
     {
@@ -77,9 +91,8 @@ void GameScene::Initialize()
 {
     if (ownsRuntime)
         throw std::logic_error("Scene is already initialized");
-    if (!GameObject::activeObjs.empty() || !GameObject::objsToAdd.empty() ||
-        !GameObject::objsToDelete.empty())
-        throw std::logic_error("Only one scene can use the global object collections");
+    if (ColliderFactory::Get().HasPhysicsWorld())
+        throw std::logic_error("Only one scene can use the global physics services");
 
     ownsRuntime = true;
     try
@@ -93,27 +106,26 @@ void GameScene::Initialize()
         world->RegisterSystem<ParticleUpdater>();
         auto camera = std::make_unique<Camera>();
         auto cameraPtr = camera.get();
-        GameObject::activeObjs.emplace_back(std::move(camera));
+        QueueAdd(std::move(camera));
         world->RegisterSystem<SpriteRenderer>(renderer, *cameraPtr);
 
         physicsWorld = std::make_unique<b2World>(b2Vec2(0, -9.811f));
         setUpDebugDraw(*cameraPtr);
         ColliderFactory::Get().Init(physicsWorld.get());
-        weaponManager = std::make_unique<WeaponManager>(renderer, *cameraPtr);
+        weaponManager = std::make_unique<WeaponManager>(renderer, *cameraPtr, *this);
         wormManager = std::make_unique<WormManager>(renderer, world.get(), physicsWorld.get(),
-                                                    *cameraPtr, *weaponManager->GetWeapon());
+                                                    *cameraPtr, *weaponManager->GetWeapon(), this);
         wormManager->CreateTeam(4);
         wormManager->CreateTeam(4);
-        GameObject::activeObjs.emplace_back(std::make_unique<Map>(physicsWorld.get()));
+        QueueAdd(std::make_unique<Map>(physicsWorld.get()));
 
         // Keep the camera's update/render order while owning it throughout initialization.
         auto cameraIt =
-            std::find_if(GameObject::activeObjs.begin(), GameObject::activeObjs.end(),
+            std::find_if(pendingAdds.begin(), pendingAdds.end(),
                          [cameraPtr](const auto& object) { return object.get() == cameraPtr; });
-        std::rotate(cameraIt, std::next(cameraIt), GameObject::activeObjs.end());
+        std::rotate(cameraIt, std::next(cameraIt), pendingAdds.end());
 
-        for (auto& gameObject : GameObject::activeObjs)
-            gameObject->Initialise(renderer, world.get());
+        ProcessPendingAdds();
 
         weaponManager->Initialise();
 
@@ -150,10 +162,126 @@ void GameScene::registerComponents()
     world->RegisterComponent<Particle>();
 }
 
+void GameScene::ValidateObject(const GameObject& object) const
+{
+    if (!ownsRuntime || cleaningUp)
+        throw std::logic_error("Scene is not accepting objects");
+    if (object.scene && object.scene != this)
+        throw std::invalid_argument("Object belongs to another scene");
+    if (object.HasEntity() && object.world != world.get())
+        throw std::invalid_argument("Object belongs to another ECS world");
+}
+
+void GameScene::QueueAdd(std::unique_ptr<GameObject> object)
+{
+    if (!object)
+        throw std::invalid_argument("Cannot add a null object");
+    ValidateObject(*object);
+    if (object->HasEntity())
+        throw std::invalid_argument("QueueAdd requires an uninitialized object");
+    auto* pointer = object.get();
+    pendingAdds.emplace_back(std::move(object));
+    pointer->scene = this;
+}
+
+GameObject& GameScene::AddObject(std::unique_ptr<GameObject> object)
+{
+    if (processingFrame || initializingObject)
+        throw std::logic_error("Use QueueAdd during frame processing or initialization");
+    return ActivateObject(std::move(object));
+}
+
+GameObject& GameScene::ActivateObject(std::unique_ptr<GameObject> object)
+{
+    if (!object)
+        throw std::invalid_argument("Cannot add a null object");
+    ValidateObject(*object);
+    object->scene = this;
+    initializingObject = object.get();
+    try
+    {
+        if (activeObjects.size() == activeObjects.capacity())
+            activeObjects.reserve(std::max(activeObjects.size() + 1, activeObjects.capacity() * 2));
+        if (!object->HasEntity())
+            object->Initialise(renderer, world.get());
+        auto& result = *object;
+        activeObjects.emplace_back(std::move(object));
+        initializingObject = nullptr;
+        return result;
+    }
+    catch (...)
+    {
+        std::erase(pendingRemovals, initializingObject);
+        initializingObject = nullptr;
+        TryCleanup("Failed object initialization cleanup", [&object] { object->CleanUp(); });
+        // Startup managers may still reference this object while the scene rolls back.
+        if (!initialized)
+            failedStartupObject = std::move(object);
+        throw;
+    }
+}
+
+void GameScene::RequestDestroy(GameObject& object)
+{
+    if (!ownsRuntime || cleaningUp)
+        throw std::logic_error("Scene is not accepting removal requests");
+    const auto owns = [&object](const auto& item) { return item.get() == &object; };
+    if (initializingObject != &object &&
+        std::none_of(activeObjects.begin(), activeObjects.end(), owns) &&
+        std::none_of(pendingAdds.begin(), pendingAdds.end(), owns))
+        throw std::invalid_argument("Object is not owned by this scene");
+    if (std::find(pendingRemovals.begin(), pendingRemovals.end(), &object) == pendingRemovals.end())
+        pendingRemovals.push_back(&object);
+}
+
+void GameScene::ProcessPendingAdds()
+{
+    // Process only this batch; additions from initialization wait for the next frame.
+    const auto count = pendingAdds.size();
+    for (std::size_t index = 0; index < count; ++index)
+    {
+        auto object = std::move(pendingAdds.front());
+        pendingAdds.pop_front();
+        auto removal = std::find(pendingRemovals.begin(), pendingRemovals.end(), object.get());
+        if (removal != pendingRemovals.end())
+        {
+            pendingRemovals.erase(removal);
+            TryCleanup("Cancelled object cleanup failed", [&object] { object->CleanUp(); });
+            continue;
+        }
+        ActivateObject(std::move(object));
+    }
+}
+
+void GameScene::ProcessPendingRemovals()
+{
+    const auto count = pendingRemovals.size();
+    for (std::size_t index = 0; index < count; ++index)
+    {
+        auto* object = pendingRemovals.front();
+        auto found = std::find_if(activeObjects.begin(), activeObjects.end(),
+                                  [object](const auto& item) { return item.get() == object; });
+        if (found == activeObjects.end())
+        {
+            // Objects queued by an initializer may still await the next addition batch.
+            std::rotate(pendingRemovals.begin(), std::next(pendingRemovals.begin()),
+                        pendingRemovals.end());
+            continue;
+        }
+        // Keep ownership and the removal request if cleanup throws; retry next frame.
+        (*found)->CleanUp();
+        pendingRemovals.pop_front();
+        activeObjects.erase(found);
+    }
+}
+
 void GameScene::Update()
 {
     if (!initialized)
         return;
+    if (processingFrame)
+        throw std::logic_error("Scene update is already in progress");
+    ScopedFrame frame(processingFrame);
     ContactManager::Get().Update();
 
     world->Update();
@@ -163,31 +291,10 @@ void GameScene::Update()
     wormManager->Update();
     weaponManager->Update();
 
-    for (auto& ptr : GameObject::objsToAdd)
-    {
-        ptr->Initialise(renderer, world.get());
-        GameObject::activeObjs.emplace_back(std::move(ptr));
-    }
-    GameObject::objsToAdd.clear();
+    ProcessPendingAdds();
+    ProcessPendingRemovals();
 
-    if (GameObject::objsToDelete.size() > 0)
-        GameObject::activeObjs.erase(
-            std::remove_if(GameObject::activeObjs.begin(), GameObject::activeObjs.end(),
-                           [](std::unique_ptr<GameObject>& value)
-                           {
-                               bool found =
-                                   std::find(GameObject::objsToDelete.begin(),
-                                             GameObject::objsToDelete.end(),
-                                             value.get()) != GameObject::objsToDelete.end();
-                               if (found)
-                                   value->CleanUp();
-                               return found;
-                           }),
-            GameObject::activeObjs.end());
-
-    GameObject::objsToDelete.clear();
-
-    for (auto& gameObject : GameObject::activeObjs)
+    for (auto& gameObject : activeObjects)
         gameObject->Update();
     ContactManager::Get().RethrowPendingException();
 }
@@ -196,7 +303,10 @@ void GameScene::Render()
 {
     if (!initialized)
         return;
-    for (auto& gameObject : GameObject::activeObjs)
+    if (processingFrame)
+        throw std::logic_error("Scene frame is already in progress");
+    ScopedFrame frame(processingFrame);
+    for (auto& gameObject : activeObjects)
         gameObject->Render();
 
     world->Render();
@@ -211,9 +321,10 @@ void GameScene::RenderDebug()
 
 void GameScene::CleanUp() noexcept
 {
-    if (!ownsRuntime)
+    if (!ownsRuntime || cleaningUp)
         return;
     initialized = false;
+    cleaningUp = true;
 
     if (Mix_QuerySpec(nullptr, nullptr, nullptr))
     {
@@ -232,14 +343,20 @@ void GameScene::CleanUp() noexcept
         TryCleanup("Worm manager cleanup failed", [this] { wormManager->CleanUp(); });
     }
 
-    for (auto& object : GameObject::activeObjs)
+    if (failedStartupObject)
+    {
+        TryCleanup("Failed startup object cleanup",
+                   [this] { failedStartupObject->CleanUp(); });
+    }
+
+    for (auto& object : activeObjects)
     {
         if (object)
         {
             TryCleanup("Active object cleanup failed", [&object] { object->CleanUp(); });
         }
     }
-    for (auto& object : GameObject::objsToAdd)
+    for (auto& object : pendingAdds)
     {
         if (object)
         {
@@ -252,16 +369,18 @@ void GameScene::CleanUp() noexcept
     ContactManager::Get().ClearAll();
 
     wormManager.reset();
-    GameObject::objsToDelete.clear();
-    GameObject::objsToAdd.clear();
-    GameObject::activeObjs.clear();
+    pendingRemovals.clear();
+    pendingAdds.clear();
+    activeObjects.clear();
 
     weaponManager.reset();
     music.reset();
     b2DebugDraw.reset();
+    failedStartupObject.reset();
     ColliderFactory::Get().Init(nullptr);
     physicsWorld.reset();
     world.reset();
 
     ownsRuntime = false;
+    cleaningUp = false;
 }

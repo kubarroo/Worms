@@ -1,4 +1,5 @@
 #include "Game/Player/Worm.h"
+#include "Game/GameScene.h"
 #include "Core/Input.h"
 #include "Core/ParticleSystem.h"
 #include "Core/Physics/ContactManager.h"
@@ -10,7 +11,7 @@
 #include <box2d/b2_polygon_shape.h>
 
 Worm::Worm(SDL_Renderer* newRenderer, World* newWorld, b2World* physicsWorld, const Camera& camera,
-           SDL_Texture* texture)
+           SDL_Texture* texture, GameScene* scene) : GameObject(scene)
 {
     try
     {
@@ -88,7 +89,7 @@ void Worm::Update(std::vector<Worm*>& wormsToDelete)
 
     if (healthBar->getCurrentHp() <= 0)
     {
-        GameObject::objsToAdd.emplace_back(
+        Scene().QueueAdd(
             std::make_unique<ParticleSystem>("blood.png", 2.f, pos.x, pos.y, 200));
         wormsToDelete.emplace_back(this);
     }

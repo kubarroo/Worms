@@ -1,7 +1,16 @@
 #include "WeaponManager.h"
+#include "Game/GameScene.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include <stdexcept>
 #include <utility>
+
+WeaponManager::WeaponManager(SDL_Renderer* renderer, Camera& camera, GameScene& scene)
+    : renderer(renderer)
+{
+    auto newWeapon = std::make_unique<Weapon>(camera);
+    weapon = newWeapon.get();
+    scene.QueueAdd(std::move(newWeapon));
+}
 
 void WeaponManager::LoadTexture(const std::string& path)
 {

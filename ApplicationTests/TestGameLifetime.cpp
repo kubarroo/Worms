@@ -19,6 +19,8 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <span>
+#include <utility>
 
 static_assert(!std::is_copy_constructible_v<Sound>);
 static_assert(!std::is_copy_assignable_v<Sound>);
@@ -34,12 +36,43 @@ struct GameTestAccess
     static b2World& Physics(Game& game) { return *game.scene->physicsWorld; }
     static bool HasScene(const Game& game) { return static_cast<bool>(game.scene); }
     static void ResetScene(Game& game) { game.scene.reset(); }
+    static GameScene& Scene(Game& game) { return *game.scene; }
+    static std::span<const std::unique_ptr<GameObject>> Objects(const Game& game)
+    {
+        if (!game.scene) return {};
+        return game.scene->activeObjects;
+    }
+    static std::size_t PendingAddCount(const Game& game)
+    {
+        return game.scene ? game.scene->pendingAdds.size() : 0;
+    }
+    static std::size_t PendingRemovalCount(const Game& game)
+    {
+        return game.scene ? game.scene->pendingRemovals.size() : 0;
+    }
     static World& Registry(GameScene& scene) { return *scene.world; }
     static b2World& Physics(GameScene& scene) { return *scene.physicsWorld; }
+    static void ActivateStartupObject(GameScene& scene, std::unique_ptr<GameObject> object)
+    {
+        const auto initialized = std::exchange(scene.initialized, false);
+        try
+        {
+            scene.AddObject(std::move(object));
+        }
+        catch (...)
+        {
+            scene.initialized = initialized;
+            throw;
+        }
+        scene.initialized = initialized;
+    }
     static bool HasResources(const GameScene& scene)
     {
         return scene.world || scene.physicsWorld || scene.b2DebugDraw ||
-               scene.wormManager || scene.weaponManager || scene.music || scene.ownsRuntime;
+               scene.wormManager || scene.weaponManager || scene.music || scene.ownsRuntime ||
+               scene.failedStartupObject ||
+               !scene.activeObjects.empty() || !scene.pendingAdds.empty() ||
+               !scene.pendingRemovals.empty();
     }
 };
 
@@ -126,10 +159,10 @@ private:
     std::filesystem::path previous;
 };
 
-class SceneAssetsWithoutMusic
+class SceneAssetsWithout
 {
 public:
-    SceneAssetsWithoutMusic()
+    explicit SceneAssetsWithout(const std::filesystem::path& missingAsset)
         : path(std::filesystem::temp_directory_path() /
                ("worms-scene-assets-" + std::to_string(SDL_GetPerformanceCounter())))
     {
@@ -140,7 +173,8 @@ public:
                  std::filesystem::directory_iterator(std::filesystem::current_path()))
             {
                 const auto extension = entry.path().extension();
-                if (entry.is_regular_file() && (extension == ".png" || extension == ".wav"))
+                if (entry.is_regular_file() && entry.path().filename() != missingAsset &&
+                    (extension == ".png" || extension == ".wav" || extension == ".ogg"))
                     std::filesystem::copy_file(entry.path(), path / entry.path().filename());
             }
         }
@@ -150,10 +184,10 @@ public:
             throw;
         }
     }
-    ~SceneAssetsWithoutMusic() { Remove(); }
+    ~SceneAssetsWithout() { Remove(); }
     const std::filesystem::path& Directory() const { return path; }
-    SceneAssetsWithoutMusic(const SceneAssetsWithoutMusic&) = delete;
-    SceneAssetsWithoutMusic& operator=(const SceneAssetsWithoutMusic&) = delete;
+    SceneAssetsWithout(const SceneAssetsWithout&) = delete;
+    SceneAssetsWithout& operator=(const SceneAssetsWithout&) = delete;
 private:
     void Remove() noexcept
     {
@@ -205,6 +239,16 @@ public:
     World& Registry() { return GameTestAccess::Registry(*this); }
     b2World& Physics() { return GameTestAccess::Physics(*this); }
     SDL_Renderer* Renderer() { return renderer; }
+    GameScene& Scene() { return GameTestAccess::Scene(*this); }
+    auto Objects() const { return GameTestAccess::Objects(*this); }
+    auto PendingAddCount() const { return GameTestAccess::PendingAddCount(*this); }
+    auto PendingRemovalCount() const { return GameTestAccess::PendingRemovalCount(*this); }
+    GameObject& AddObject(std::unique_ptr<GameObject> object)
+    {
+        return Scene().AddObject(std::move(object));
+    }
+    void QueueAdd(std::unique_ptr<GameObject> object) { Scene().QueueAdd(std::move(object)); }
+    void RequestDestroy(GameObject& object) { Scene().RequestDestroy(object); }
     bool HasResources() const { return GameTestAccess::HasScene(*this) || renderer || window; }
 };
 
@@ -219,15 +263,53 @@ private:
     int& destroyed;
 };
 
+struct QueueProbeStats
+{
+    int initialized = 0;
+    int updated = 0;
+    int cleaned = 0;
+    int destroyed = 0;
+};
+
+class QueueProbe : public GameObject
+{
+public:
+    explicit QueueProbe(std::shared_ptr<QueueProbeStats> stats) : stats(std::move(stats)) {}
+    ~QueueProbe() override { ++stats->destroyed; }
+    void Initialise(SDL_Renderer* renderer, World* world) override
+    {
+        GameObject::Initialise(renderer, world);
+        ++stats->initialized;
+        if (onInitialize) onInitialize(*this);
+    }
+    void Update() override
+    {
+        ++stats->updated;
+        if (onUpdate) onUpdate(*this);
+    }
+    void CleanUp() override
+    {
+        ++stats->cleaned;
+        if (onCleanup) onCleanup(*this);
+        GameObject::CleanUp();
+    }
+    GameScene& Owner() { return Scene(); }
+    std::function<void(QueueProbe&)> onInitialize;
+    std::function<void(QueueProbe&)> onUpdate;
+    std::function<void(QueueProbe&)> onCleanup;
+private:
+    std::shared_ptr<QueueProbeStats> stats;
+};
+
 class GameLifetime : public testing::Test
 {
 protected:
     void SetUp() override
     {
-        ASSERT_TRUE(GameObject::activeObjs.empty());
-        ASSERT_TRUE(GameObject::objsToAdd.empty());
+        ASSERT_TRUE(game.Objects().empty());
+        ASSERT_TRUE(game.PendingAddCount() == 0);
         ASSERT_NO_THROW(game.InitWindow("Lifetime test", 800, 600));
-        for (const auto& object : GameObject::activeObjs)
+        for (const auto& object : game.Objects())
         {
             if (auto* candidate = dynamic_cast<Camera*>(object.get()))
                 camera = candidate;
@@ -256,9 +338,9 @@ protected:
         EXPECT_FALSE(game.HasResources());
         EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), 0);
         EXPECT_FALSE(ContactManager::Get().TakePendingException());
-        EXPECT_TRUE(GameObject::activeObjs.empty());
-        EXPECT_TRUE(GameObject::objsToAdd.empty());
-        EXPECT_TRUE(GameObject::objsToDelete.empty());
+        EXPECT_TRUE(game.Objects().empty());
+        EXPECT_TRUE(game.PendingAddCount() == 0);
+        EXPECT_TRUE(game.PendingRemovalCount() == 0);
     }
 
     void CreateTestTeam()
@@ -283,7 +365,7 @@ protected:
     void CreateManager()
     {
         manager = std::make_unique<WormManager>(
-            game.Renderer(), &game.Registry(), &game.Physics(), *camera, *weapon);
+            game.Renderer(), &game.Registry(), &game.Physics(), *camera, *weapon, &game.Scene());
     }
 
     void KillActiveWorm()
@@ -326,7 +408,7 @@ TEST_F(GameLifetime, SceneDestructionReleasesGameplayButKeepsPlatformAlive)
     const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
     GameTestAccess::ResetScene(game);
     EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), 0);
-    EXPECT_TRUE(GameObject::activeObjs.empty());
+    EXPECT_TRUE(game.Objects().empty());
     EXPECT_NE(SDL_WasInit(SDL_INIT_VIDEO), 0);
     EXPECT_NE(ImGui::GetCurrentContext(), nullptr);
     EXPECT_NE(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
@@ -341,12 +423,12 @@ TEST_F(GameLifetime, SceneDestructionReleasesGameplayButKeepsPlatformAlive)
             EXPECT_NO_THROW(scene.Update());
             EXPECT_NO_THROW(scene.Render());
             EXPECT_NO_THROW(scene.RenderDebug());
-            GameObject::objsToAdd.emplace_back(
+            scene.QueueAdd(
                 std::make_unique<ParticleSystem>("blood.png", 1, 0, 0, 2));
         }
-        EXPECT_TRUE(GameObject::activeObjs.empty());
-        EXPECT_TRUE(GameObject::objsToAdd.empty());
-        EXPECT_TRUE(GameObject::objsToDelete.empty());
+        EXPECT_TRUE(game.Objects().empty());
+        EXPECT_TRUE(game.PendingAddCount() == 0);
+        EXPECT_TRUE(game.PendingRemovalCount() == 0);
         EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), 0);
         EXPECT_EQ(SDL_RenderClear(game.Renderer()), 0);
     }
@@ -363,7 +445,7 @@ TEST_F(GameLifetime, FailedSceneInitializationRollsBackAndCanBeRetried)
         EXPECT_THROW(scene.Initialize(), SDL_Exception);
     }
     EXPECT_FALSE(GameTestAccess::HasResources(scene));
-    EXPECT_TRUE(GameObject::activeObjs.empty());
+    EXPECT_TRUE(game.Objects().empty());
     EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), 0);
     EXPECT_NO_THROW(scene.CleanUp());
     EXPECT_NO_THROW(scene.Update());
@@ -374,6 +456,178 @@ TEST_F(GameLifetime, FailedSceneInitializationRollsBackAndCanBeRetried)
     scene.CleanUp();
     EXPECT_FALSE(GameTestAccess::HasResources(scene));
     EXPECT_NO_THROW(scene.CleanUp());
+}
+
+TEST_F(GameLifetime, ObjectsSpawnedDuringUpdateWaitUntilNextFrameAndSelfRemovalIsDeferred)
+{
+    ScopedDeltaTime delta(0);
+    const auto active = game.Objects().size();
+    auto parentStats = std::make_shared<QueueProbeStats>();
+    auto childStats = std::make_shared<QueueProbeStats>();
+    auto parent = std::make_unique<QueueProbe>(parentStats);
+    parent->onUpdate = [childStats](QueueProbe& object)
+    {
+        object.Owner().QueueAdd(std::make_unique<QueueProbe>(childStats));
+        object.Owner().RequestDestroy(object);
+        object.Owner().RequestDestroy(object);
+        EXPECT_THROW(object.Owner().AddObject(std::make_unique<GameObject>()), std::logic_error);
+    };
+    auto& added = game.AddObject(std::move(parent));
+    const auto handle = game.Registry().GetHandle(added.GetId());
+    ASSERT_TRUE(handle);
+    game.Update();
+    EXPECT_EQ(parentStats->updated, 1);
+    EXPECT_EQ(parentStats->destroyed, 0);
+    EXPECT_EQ(childStats->initialized, 0);
+    EXPECT_EQ(game.PendingAddCount(), 1);
+    EXPECT_EQ(game.PendingRemovalCount(), 1);
+    game.Update();
+    EXPECT_EQ(parentStats->cleaned, 1);
+    EXPECT_EQ(parentStats->destroyed, 1);
+    EXPECT_FALSE(game.Registry().IsAlive(*handle));
+    EXPECT_EQ(childStats->initialized, 1);
+    EXPECT_EQ(childStats->updated, 1);
+    EXPECT_EQ(game.Objects().size(), active + 1);
+    EXPECT_EQ(game.PendingAddCount(), 0);
+    EXPECT_EQ(game.PendingRemovalCount(), 0);
+}
+
+TEST_F(GameLifetime, InitializerCanQueueAnotherObjectWithoutChangingItsCurrentBatch)
+{
+    ScopedDeltaTime delta(0);
+    auto parentStats = std::make_shared<QueueProbeStats>();
+    auto childStats = std::make_shared<QueueProbeStats>();
+    auto parent = std::make_unique<QueueProbe>(parentStats);
+    parent->onInitialize = [childStats](QueueProbe& object)
+    {
+        object.Owner().QueueAdd(std::make_unique<QueueProbe>(childStats));
+        EXPECT_THROW(object.Owner().AddObject(std::make_unique<GameObject>()), std::logic_error);
+    };
+    game.QueueAdd(std::move(parent));
+    game.Update();
+    EXPECT_EQ(parentStats->initialized, 1);
+    EXPECT_EQ(childStats->initialized, 0);
+    EXPECT_EQ(game.PendingAddCount(), 1);
+    game.Update();
+    EXPECT_EQ(parentStats->initialized, 1);
+    EXPECT_EQ(childStats->initialized, 1);
+    EXPECT_EQ(game.PendingAddCount(), 0);
+}
+
+TEST_F(GameLifetime, FailedMiddleAdditionDoesNotReinitializeEarlierObjectsOrLoseLaterOnes)
+{
+    ScopedDeltaTime delta(0);
+    const auto active = game.Objects().size();
+    auto first = std::make_shared<QueueProbeStats>();
+    auto failed = std::make_shared<QueueProbeStats>();
+    auto last = std::make_shared<QueueProbeStats>();
+    game.QueueAdd(std::make_unique<QueueProbe>(first));
+    auto failing = std::make_unique<QueueProbe>(failed);
+    failing->onInitialize = [](QueueProbe& object)
+    {
+        object.Owner().RequestDestroy(object);
+        throw std::runtime_error("Initializer failure");
+    };
+    game.QueueAdd(std::move(failing));
+    game.QueueAdd(std::make_unique<QueueProbe>(last));
+    EXPECT_THROW(game.Update(), std::runtime_error);
+    EXPECT_EQ(first->initialized, 1);
+    EXPECT_EQ(first->destroyed, 0);
+    EXPECT_EQ(failed->cleaned, 1);
+    EXPECT_EQ(failed->destroyed, 1);
+    EXPECT_EQ(last->initialized, 0);
+    EXPECT_EQ(game.Objects().size(), active + 1);
+    EXPECT_EQ(game.PendingAddCount(), 1);
+    EXPECT_EQ(game.PendingRemovalCount(), 0);
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities - 1);
+    EXPECT_NO_THROW(game.Update());
+    EXPECT_EQ(first->initialized, 1);
+    EXPECT_EQ(last->initialized, 1);
+    EXPECT_EQ(game.Objects().size(), active + 2);
+    EXPECT_EQ(game.PendingAddCount(), 0);
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities - 2);
+}
+
+TEST_F(GameLifetime, PendingObjectCanBeCancelledBeforeInitialization)
+{
+    auto stats = std::make_shared<QueueProbeStats>();
+    auto object = std::make_unique<QueueProbe>(stats);
+    auto* pointer = object.get();
+    game.QueueAdd(std::move(object));
+    game.RequestDestroy(*pointer);
+    game.RequestDestroy(*pointer);
+    EXPECT_EQ(game.PendingRemovalCount(), 1);
+    game.Update();
+    EXPECT_EQ(stats->initialized, 0);
+    EXPECT_EQ(stats->destroyed, 1);
+    EXPECT_EQ(game.PendingAddCount(), 0);
+    EXPECT_EQ(game.PendingRemovalCount(), 0);
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+}
+
+TEST_F(GameLifetime, QueueRejectsNullObjectsAndRemovalOfObjectsOutsideScene)
+{
+    GameObject foreign;
+    const auto active = game.Objects().size();
+    EXPECT_THROW(game.QueueAdd(nullptr), std::invalid_argument);
+    EXPECT_THROW(game.AddObject(nullptr), std::invalid_argument);
+    EXPECT_THROW(game.RequestDestroy(foreign), std::invalid_argument);
+    GameScene inactive(game.Renderer());
+    EXPECT_THROW(inactive.QueueAdd(std::make_unique<GameObject>()), std::logic_error);
+    EXPECT_THROW(inactive.RequestDestroy(*camera), std::logic_error);
+    EXPECT_EQ(game.Objects().size(), active);
+    EXPECT_EQ(game.PendingAddCount(), 0);
+    EXPECT_EQ(game.PendingRemovalCount(), 0);
+}
+
+TEST_F(GameLifetime, RemovalCleanupFailurePreservesOwnershipAndRemainingRequestsForRetry)
+{
+    ScopedDeltaTime delta(0);
+    auto firstStats = std::make_shared<QueueProbeStats>();
+    auto lastStats = std::make_shared<QueueProbeStats>();
+    auto first = std::make_unique<QueueProbe>(firstStats);
+    first->onCleanup = [attempt = 0](QueueProbe&) mutable
+    {
+        if (++attempt == 1) throw std::runtime_error("Cleanup failure");
+    };
+    auto& firstObject = game.AddObject(std::move(first));
+    auto& lastObject = game.AddObject(std::make_unique<QueueProbe>(lastStats));
+    game.RequestDestroy(firstObject);
+    game.RequestDestroy(lastObject);
+    EXPECT_THROW(game.Update(), std::runtime_error);
+    EXPECT_EQ(firstStats->destroyed, 0);
+    EXPECT_EQ(lastStats->cleaned, 0);
+    EXPECT_EQ(game.PendingRemovalCount(), 2);
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities - 2);
+    EXPECT_NO_THROW(game.Update());
+    EXPECT_EQ(firstStats->cleaned, 2);
+    EXPECT_EQ(firstStats->destroyed, 1);
+    EXPECT_EQ(lastStats->cleaned, 1);
+    EXPECT_EQ(lastStats->destroyed, 1);
+    EXPECT_EQ(game.PendingRemovalCount(), 0);
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+}
+
+TEST_F(GameLifetime, RemovalRequestedFromCleanupWaitsForNextFrame)
+{
+    auto firstStats = std::make_shared<QueueProbeStats>();
+    auto lastStats = std::make_shared<QueueProbeStats>();
+    auto& lastObject = game.AddObject(std::make_unique<QueueProbe>(lastStats));
+    auto first = std::make_unique<QueueProbe>(firstStats);
+    first->onCleanup = [&lastObject](QueueProbe& object)
+    {
+        object.Owner().RequestDestroy(lastObject);
+    };
+    auto& firstObject = game.AddObject(std::move(first));
+    game.RequestDestroy(firstObject);
+    game.Update();
+    EXPECT_EQ(firstStats->destroyed, 1);
+    EXPECT_EQ(lastStats->destroyed, 0);
+    EXPECT_EQ(game.PendingRemovalCount(), 1);
+    game.Update();
+    EXPECT_EQ(lastStats->destroyed, 1);
+    EXPECT_EQ(game.PendingRemovalCount(), 0);
+    EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
 }
 
 TEST_F(GameLifetime, FramePresentationAndColliderDebugStillWork)
@@ -409,18 +663,18 @@ TEST_F(GameLifetime, CleanupExceptionsDoNotStopSceneDestructionOrNextSceneStartu
     {
         auto object = std::make_unique<CleanupObject>(failure, cleaned, destroyed);
         object->Initialise(game.Renderer(), &game.Registry());
-        GameObject::activeObjs.emplace_back(std::move(object));
+        game.AddObject(std::move(object));
     }
     for (int failure : {2, 0})
-        GameObject::objsToAdd.emplace_back(
+        game.QueueAdd(
             std::make_unique<CleanupObject>(failure, cleaned, destroyed));
 
     EXPECT_NO_THROW(GameTestAccess::ResetScene(game));
     EXPECT_EQ(cleaned, 4);
     EXPECT_EQ(destroyed, 4);
-    EXPECT_TRUE(GameObject::activeObjs.empty());
-    EXPECT_TRUE(GameObject::objsToAdd.empty());
-    EXPECT_TRUE(GameObject::objsToDelete.empty());
+    EXPECT_TRUE(game.Objects().empty());
+    EXPECT_TRUE(game.PendingAddCount() == 0);
+    EXPECT_TRUE(game.PendingRemovalCount() == 0);
     EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), 0);
     EXPECT_FALSE(ContactManager::Get().TakePendingException());
     EXPECT_EQ(SDL_RenderClear(game.Renderer()), 0);
@@ -432,12 +686,68 @@ TEST_F(GameLifetime, CleanupExceptionsDoNotStopSceneDestructionOrNextSceneStartu
     EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
 }
 
+TEST_F(GameLifetime, FailedStartupObjectRemainsAliveWhileItsDependentsAreCleaned)
+{
+    auto failedStats = std::make_shared<QueueProbeStats>();
+    auto observerStats = std::make_shared<QueueProbeStats>();
+    auto failed = std::make_unique<QueueProbe>(failedStats);
+    failed->onInitialize = [](QueueProbe&) { throw std::runtime_error("Startup failure"); };
+    auto observer = std::make_unique<QueueProbe>(observerStats);
+    observer->onCleanup = [failedStats](QueueProbe&)
+    {
+        EXPECT_EQ(failedStats->destroyed, 0);
+    };
+    game.AddObject(std::move(observer));
+    EXPECT_THROW(GameTestAccess::ActivateStartupObject(game.Scene(), std::move(failed)),
+                 std::runtime_error);
+    EXPECT_EQ(failedStats->initialized, 1);
+    EXPECT_EQ(failedStats->destroyed, 0);
+    EXPECT_NO_THROW(game.Clean());
+    EXPECT_EQ(observerStats->cleaned, 1);
+    EXPECT_EQ(observerStats->destroyed, 1);
+    EXPECT_EQ(failedStats->destroyed, 1);
+    EXPECT_FALSE(game.HasResources());
+    EXPECT_NO_THROW(game.Clean());
+}
+
+TEST_F(GameLifetime, MissingWeaponPowerBarRollsBackWithoutDanglingManagerReferences)
+{
+    const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
+    GameTestAccess::ResetScene(game);
+    GameScene scene(game.Renderer());
+    SceneAssetsWithout assets("powerBar.png");
+    {
+        ScopedWorkingDirectory directory(assets.Directory());
+        try
+        {
+            scene.Initialize();
+            FAIL() << "Missing power bar should fail weapon initialization";
+        }
+        catch (const SDL_Exception& error)
+        {
+            EXPECT_EQ(std::filesystem::path(error.GetFile()).filename(), "Weapon.cpp");
+        }
+    }
+    EXPECT_FALSE(GameTestAccess::HasResources(scene));
+    EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), 0);
+    EXPECT_FALSE(ContactManager::Get().TakePendingException());
+    EXPECT_FALSE(ColliderFactory::Get().HasPhysicsWorld());
+    EXPECT_EQ(SDL_RenderClear(game.Renderer()), 0);
+    EXPECT_NO_THROW(scene.CleanUp());
+    ASSERT_NO_THROW(scene.Initialize());
+    EXPECT_EQ(GameTestAccess::Registry(scene).GetAmountOfAvailableEntities(), initialEntities);
+    EXPECT_EQ(GameTestAccess::Physics(scene).GetBodyCount(), initialBodies);
+    EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
+    EXPECT_NO_THROW(scene.CleanUp());
+    EXPECT_FALSE(GameTestAccess::HasResources(scene));
+}
+
 TEST_F(GameLifetime, MissingMusicRollsBackFullyConstructedGameplayAndAllowsRetry)
 {
     const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
     GameTestAccess::ResetScene(game);
     GameScene scene(game.Renderer());
-    SceneAssetsWithoutMusic assets;
+    SceneAssetsWithout assets("Rick_Roll.ogg");
     {
         ScopedWorkingDirectory directory(assets.Directory());
         try
@@ -452,9 +762,9 @@ TEST_F(GameLifetime, MissingMusicRollsBackFullyConstructedGameplayAndAllowsRetry
         }
     }
     EXPECT_FALSE(GameTestAccess::HasResources(scene));
-    EXPECT_TRUE(GameObject::activeObjs.empty());
-    EXPECT_TRUE(GameObject::objsToAdd.empty());
-    EXPECT_TRUE(GameObject::objsToDelete.empty());
+    EXPECT_TRUE(game.Objects().empty());
+    EXPECT_TRUE(game.PendingAddCount() == 0);
+    EXPECT_TRUE(game.PendingRemovalCount() == 0);
     EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), 0);
     EXPECT_FALSE(ContactManager::Get().TakePendingException());
     EXPECT_EQ(Mix_PlayingMusic(), 0);
@@ -578,14 +888,12 @@ TEST_F(GameLifetime, FailedTeamConstructionRollsBackBodiesAndAuxiliaryEntities)
 
 TEST_F(GameLifetime, FailedTextureLoadCanBeCleanedWithoutLeakingAnEntity)
 {
-    auto effect = std::make_unique<ParticleSystem>("missing-lifetime-test-texture.png", 1, 0, 0, 10);
-    auto* pointer = effect.get();
-    GameObject::objsToAdd.emplace_back(std::move(effect));
-    EXPECT_THROW(pointer->Initialise(game.Renderer(), &game.Registry()), SDL_Exception);
-    EXPECT_FALSE(pointer->HasEntity());
+    game.QueueAdd(std::make_unique<ParticleSystem>(
+        "missing-lifetime-test-texture.png", 1, 0, 0, 10));
+    EXPECT_THROW(game.Update(), SDL_Exception);
+    EXPECT_EQ(game.PendingAddCount(), 0);
     EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
-    EXPECT_NO_THROW(pointer->CleanUp());
-    EXPECT_NO_THROW(pointer->CleanUp());
+    EXPECT_NO_THROW(game.Update());
     EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
 }
 
@@ -612,23 +920,21 @@ TEST_F(GameLifetime, GameClosesWithActiveProjectileParticlesAndPendingObjects)
     projectile->SetGravityScale(1);
     projectile->SetMaxSpeed(2);
     auto* projectilePointer = projectile.get();
-    GameObject::activeObjs.emplace_back(std::move(projectile));
-    projectilePointer->Initialise(game.Renderer(), &game.Registry());
+    game.AddObject(std::move(projectile));
 
     auto particles = std::make_unique<ParticleSystem>("blood.png", 1, 0, 0, 10);
     auto* particlesPointer = particles.get();
-    GameObject::activeObjs.emplace_back(std::move(particles));
-    particlesPointer->Initialise(game.Renderer(), &game.Registry());
-    GameObject::objsToAdd.emplace_back(std::make_unique<ParticleSystem>("blood.png", 1, 0, 0, 3));
-    GameObject::objsToDelete.push_back(projectilePointer);
+    game.AddObject(std::move(particles));
+    game.QueueAdd(std::make_unique<ParticleSystem>("blood.png", 1, 0, 0, 3));
+    game.RequestDestroy(*projectilePointer);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies + 1);
     EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities - 12);
 
     EXPECT_NO_THROW(game.Clean());
     EXPECT_FALSE(game.HasResources());
-    EXPECT_TRUE(GameObject::activeObjs.empty());
-    EXPECT_TRUE(GameObject::objsToAdd.empty());
-    EXPECT_TRUE(GameObject::objsToDelete.empty());
+    EXPECT_TRUE(game.Objects().empty());
+    EXPECT_TRUE(game.PendingAddCount() == 0);
+    EXPECT_TRUE(game.PendingRemovalCount() == 0);
     EXPECT_EQ(SDL_WasInit(0), 0u);
     EXPECT_EQ(ImGui::GetCurrentContext(), nullptr);
     EXPECT_EQ(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
@@ -639,8 +945,7 @@ TEST_F(GameLifetime, ProjectileCanUnsubscribeDuringCollisionWithoutRemovingOther
 {
     auto projectile = std::make_unique<Projectile>(0, 2, 0, 0);
     auto* pointer = projectile.get();
-    GameObject::activeObjs.emplace_back(std::move(projectile));
-    pointer->Initialise(game.Renderer(), &game.Registry());
+    game.AddObject(std::move(projectile));
     const auto id = pointer->GetId();
     auto* body = game.Registry().GetComponent<RigidBody>(id).body;
     b2BodyDef definition;
@@ -707,7 +1012,7 @@ TEST_F(GameLifetime, CollisionExceptionIsReportedAfterStepAndDoesNotInterruptRep
 TEST_F(GameLifetime, EmptyTerrainRebuildRemovesBodyAndCleanupCanBeRepeated)
 {
     Map* map = nullptr;
-    for (const auto& object : GameObject::activeObjs)
+    for (const auto& object : game.Objects())
         if (auto* candidate = dynamic_cast<Map*>(object.get())) map = candidate;
     ASSERT_NE(map, nullptr);
     ASSERT_NE(game.Registry().GetComponent<RigidBody>(map->GetId()).body, nullptr);
@@ -724,7 +1029,7 @@ TEST_F(GameLifetime, EmptyTerrainRebuildRemovesBodyAndCleanupCanBeRepeated)
 TEST_F(GameLifetime, TinyTerrainContourDoesNotCreateInvalidBox2DLoop)
 {
     Map* map = nullptr;
-    for (const auto& object : GameObject::activeObjs)
+    for (const auto& object : game.Objects())
         if (auto* candidate = dynamic_cast<Map*>(object.get())) map = candidate;
     ASSERT_NE(map, nullptr);
     auto* surface = MapTestAccess::Surface(*map);
@@ -740,7 +1045,7 @@ TEST_F(GameLifetime, TinyTerrainContourDoesNotCreateInvalidBox2DLoop)
 TEST_F(GameLifetime, FailedMapTextureReplacementPreservesOldResourcesAndCanBeRetried)
 {
     Map* map = nullptr;
-    for (const auto& object : GameObject::activeObjs)
+    for (const auto& object : game.Objects())
         if (auto* candidate = dynamic_cast<Map*>(object.get())) map = candidate;
     ASSERT_NE(map, nullptr);
     const auto id = map->GetId();
@@ -761,7 +1066,7 @@ TEST_F(GameLifetime, FailedMapTextureReplacementPreservesOldResourcesAndCanBeRet
 TEST_F(GameLifetime, FailedMapColliderReplacementPreservesOldResourcesAndCanBeRetried)
 {
     Map* map = nullptr;
-    for (const auto& object : GameObject::activeObjs)
+    for (const auto& object : game.Objects())
         if (auto* candidate = dynamic_cast<Map*>(object.get())) map = candidate;
     ASSERT_NE(map, nullptr);
     const auto id = map->GetId();
@@ -973,14 +1278,14 @@ TEST_F(GameLifetime, ExpiredParticlesAreRemovedThroughTheGameQueueAndRestoreCoun
     };
     ScopedDeltaTime delta(0);
     const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
-    const auto active = GameObject::activeObjs.size();
+    const auto active = game.Objects().size();
     auto destroyed = std::make_shared<int>(0);
     for (int cycle = 0; cycle < 10; ++cycle)
     {
         SCOPED_TRACE(cycle);
         auto effect = std::make_unique<ExpiringParticles>(destroyed);
         auto* pointer = effect.get();
-        GameObject::objsToAdd.emplace_back(std::move(effect));
+        game.QueueAdd(std::move(effect));
         game.Update();
         const auto handle = game.Registry().GetHandle(pointer->GetId());
         ASSERT_TRUE(handle);
@@ -991,13 +1296,13 @@ TEST_F(GameLifetime, ExpiredParticlesAreRemovedThroughTheGameQueueAndRestoreCoun
             ScopedDeltaTime expire(6);
             pointer->Update();
         }
-        EXPECT_EQ(GameObject::objsToDelete.size(), 1);
+        EXPECT_EQ(game.PendingRemovalCount(), 1);
         game.Update();
         EXPECT_FALSE(game.Registry().IsAlive(*handle));
         EXPECT_EQ(*destroyed, cycle + 1);
-        EXPECT_EQ(GameObject::activeObjs.size(), active);
-        EXPECT_TRUE(GameObject::objsToAdd.empty());
-        EXPECT_TRUE(GameObject::objsToDelete.empty());
+        EXPECT_EQ(game.Objects().size(), active);
+        EXPECT_TRUE(game.PendingAddCount() == 0);
+        EXPECT_TRUE(game.PendingRemovalCount() == 0);
         EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
@@ -1008,7 +1313,7 @@ TEST_F(GameLifetime, ExplosionAndParticleExpiryRestoreCountsAcrossRepeatedGameUp
 {
     ScopedDeltaTime delta(0);
     const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
-    const auto active = GameObject::activeObjs.size();
+    const auto active = game.Objects().size();
     for (int cycle = 0; cycle < 5; ++cycle)
     {
         SCOPED_TRACE(cycle);
@@ -1017,25 +1322,25 @@ TEST_F(GameLifetime, ExplosionAndParticleExpiryRestoreCountsAcrossRepeatedGameUp
         projectile->Initialise(game.Renderer(), &game.Registry());
         const auto handle = game.Registry().GetHandle(projectile->GetId());
         ASSERT_TRUE(handle);
-        GameObject::activeObjs.emplace_back(std::move(projectile));
+        game.AddObject(std::move(projectile));
         game.Update();
-        EXPECT_EQ(GameObject::objsToAdd.size(), 1);
-        EXPECT_EQ(GameObject::objsToDelete.size(), 1);
+        EXPECT_EQ(game.PendingAddCount(), 1);
+        EXPECT_EQ(game.PendingRemovalCount(), 1);
         game.Update();
         EXPECT_FALSE(game.Registry().IsAlive(*handle));
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
         EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities - 101);
-        for (const auto& object : GameObject::activeObjs)
+        for (const auto& object : game.Objects())
             if (auto* particles = dynamic_cast<ParticleSystem*>(object.get()))
             {
                 ScopedDeltaTime expire(6);
                 particles->Update();
             }
         game.Update();
-        EXPECT_EQ(GameObject::activeObjs.size(), active);
-        EXPECT_TRUE(GameObject::objsToAdd.empty());
-        EXPECT_TRUE(GameObject::objsToDelete.empty());
+        EXPECT_EQ(game.Objects().size(), active);
+        EXPECT_TRUE(game.PendingAddCount() == 0);
+        EXPECT_TRUE(game.PendingRemovalCount() == 0);
         EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
@@ -1046,7 +1351,7 @@ TEST_F(GameLifetime, RepeatedLastTeamDeathsAndTheirParticlesRestoreCounts)
 {
     ScopedDeltaTime delta(0);
     const auto subscriptions = ContactManager::Get().GetSubscriptionCount();
-    const auto active = GameObject::activeObjs.size();
+    const auto active = game.Objects().size();
     CreateManager();
     for (int cycle = 0; cycle < 5; ++cycle)
     {
@@ -1060,18 +1365,18 @@ TEST_F(GameLifetime, RepeatedLastTeamDeathsAndTheirParticlesRestoreCounts)
         EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
-        EXPECT_EQ(GameObject::objsToAdd.size(), 1);
+        EXPECT_EQ(game.PendingAddCount(), 1);
         game.Update();
-        for (const auto& object : GameObject::activeObjs)
+        for (const auto& object : game.Objects())
             if (auto* particles = dynamic_cast<ParticleSystem*>(object.get()))
             {
                 ScopedDeltaTime expire(6);
                 particles->Update();
             }
         game.Update();
-        EXPECT_EQ(GameObject::activeObjs.size(), active);
-        EXPECT_TRUE(GameObject::objsToAdd.empty());
-        EXPECT_TRUE(GameObject::objsToDelete.empty());
+        EXPECT_EQ(game.Objects().size(), active);
+        EXPECT_TRUE(game.PendingAddCount() == 0);
+        EXPECT_TRUE(game.PendingRemovalCount() == 0);
         EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
@@ -1095,21 +1400,22 @@ TEST_F(GameLifetime, DuplicateDeletionRequestsCleanAndDestroyAnObjectOnlyOnce)
     auto object = std::make_unique<DeletionProbe>(cleaned, destroyed);
     object->Initialise(game.Renderer(), &game.Registry());
     const auto handle = game.Registry().GetHandle(object->GetId());
-    GameObject::objsToDelete.push_back(object.get());
-    GameObject::objsToDelete.push_back(object.get());
-    GameObject::activeObjs.emplace_back(std::move(object));
+    auto* pointer = object.get();
+    game.AddObject(std::move(object));
+    game.RequestDestroy(*pointer);
+    game.RequestDestroy(*pointer);
     game.Update();
     EXPECT_EQ(cleaned, 1);
     EXPECT_EQ(destroyed, 1);
     EXPECT_FALSE(game.Registry().IsAlive(*handle));
-    EXPECT_TRUE(GameObject::objsToDelete.empty());
+    EXPECT_TRUE(game.PendingRemovalCount() == 0);
     EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
 }
 
 TEST_F(GameLifetime, RepeatedTerrainDeformationReplacesResourcesWithoutGrowingCounts)
 {
     Map* map = nullptr;
-    for (const auto& object : GameObject::activeObjs)
+    for (const auto& object : game.Objects())
         if (auto* candidate = dynamic_cast<Map*>(object.get())) map = candidate;
     ASSERT_NE(map, nullptr);
     auto* surface = MapTestAccess::Surface(*map);
@@ -1161,16 +1467,16 @@ TEST_F(GameLifetime, RepeatedFullGameStartupAndShutdownReleaseSubsystemsAndSubsc
         EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), subscriptions);
         auto particles = std::make_unique<ParticleSystem>("blood.png", 1, 0, 0, 4);
         particles->Initialise(game.Renderer(), &game.Registry());
-        GameObject::activeObjs.emplace_back(std::move(particles));
+        game.AddObject(std::move(particles));
         auto projectile = std::make_unique<Projectile>(100, 100, 0, 0);
         projectile->Initialise(game.Renderer(), &game.Registry());
-        GameObject::activeObjs.emplace_back(std::move(projectile));
-        GameObject::objsToAdd.emplace_back(std::make_unique<ParticleSystem>("blood.png", 1, 0, 0, 2));
+        game.AddObject(std::move(projectile));
+        game.QueueAdd(std::make_unique<ParticleSystem>("blood.png", 1, 0, 0, 2));
         game.Clean();
         EXPECT_FALSE(game.HasResources());
-        EXPECT_TRUE(GameObject::activeObjs.empty());
-        EXPECT_TRUE(GameObject::objsToAdd.empty());
-        EXPECT_TRUE(GameObject::objsToDelete.empty());
+        EXPECT_TRUE(game.Objects().empty());
+        EXPECT_TRUE(game.PendingAddCount() == 0);
+        EXPECT_TRUE(game.PendingRemovalCount() == 0);
         EXPECT_EQ(ContactManager::Get().GetSubscriptionCount(), 0);
         EXPECT_FALSE(ContactManager::Get().TakePendingException());
         EXPECT_EQ(SDL_WasInit(0), 0);
@@ -1232,7 +1538,7 @@ TEST_F(GameLifetime, ObserversRejectAReusedTargetBeforeTheirNextUpdate)
     camera->ChangeTarget(target);
     weapon->SetParent(target);
     WeaponTestAccess::SetCharge(*weapon);
-    const auto pending = GameObject::objsToAdd.size();
+    const auto pending = game.PendingAddCount();
     while (world.GetAmountOfAvailableEntities()) world.CreateEntity();
     world.DestroyEntity(target);
     const auto replacement = world.CreateEntity();
@@ -1248,7 +1554,7 @@ TEST_F(GameLifetime, ObserversRejectAReusedTargetBeforeTheirNextUpdate)
     weapon->Update();
     EXPECT_FALSE(WeaponTestAccess::HasParent(*weapon));
     EXPECT_FLOAT_EQ(WeaponTestAccess::Charge(*weapon), 0);
-    EXPECT_EQ(GameObject::objsToAdd.size(), pending);
+    EXPECT_EQ(game.PendingAddCount(), pending);
     world.Update();
     EXPECT_FALSE(world.GetComponent<Follow>(follower).id);
     EXPECT_FLOAT_EQ(world.GetComponent<Position>(follower).x, 5);

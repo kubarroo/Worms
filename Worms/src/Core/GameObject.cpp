@@ -1,9 +1,11 @@
 #include "Core/GameObject.h"
-#include "Terminal/Terminal.h"
+#include "Game/GameScene.h"
 
-std::vector<std::unique_ptr<GameObject>> GameObject::activeObjs;
-std::vector<std::unique_ptr<GameObject>> GameObject::objsToAdd;
-std::vector<GameObject*> GameObject::objsToDelete;
+GameScene& GameObject::Scene() const
+{
+    if (!scene) throw std::logic_error("GameObject has no scene");
+    return *scene;
+}
 
 void GameObject::Initialise(SDL_Renderer* newRenderer, World* newWorld)
 {
