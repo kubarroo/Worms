@@ -132,7 +132,38 @@ class TestApp : public App
 public:
     bool HasWindow() const { return window != nullptr; }
     bool HasRenderer() const { return renderer != nullptr; }
+    using App::StopAudioPlayback;
 };
+
+TEST(CleanupSafety, StoppingPlaybackKeepsDeviceAndPlatformAliveAndAllowsRestart)
+{
+    ScopedHint video(SDL_HINT_VIDEODRIVER, "dummy");
+    ScopedHint audio(SDL_HINT_AUDIODRIVER, "dummy");
+    ScopedHint renderer(SDL_HINT_RENDER_DRIVER, "software");
+    TestApp app;
+    ASSERT_NO_THROW(app.InitWindow("Test", 32, 32));
+    std::vector<Uint8> samples(44100, 0);
+    std::unique_ptr<Mix_Chunk, decltype(&Mix_FreeChunk)> sound(
+        Mix_QuickLoad_RAW(samples.data(), static_cast<Uint32>(samples.size())), Mix_FreeChunk);
+    ASSERT_NE(sound, nullptr);
+    ASSERT_GE(Mix_PlayChannel(-1, sound.get(), -1), 0);
+    EXPECT_GT(Mix_Playing(-1), 0);
+    app.StopAudioPlayback();
+    app.StopAudioPlayback();
+    EXPECT_EQ(Mix_Playing(-1), 0);
+    EXPECT_GT(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+    EXPECT_TRUE(app.HasWindow());
+    EXPECT_TRUE(app.HasRenderer());
+    EXPECT_TRUE(app.IsRunning());
+    sound.reset();
+    app.Clean();
+    EXPECT_EQ(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+    ASSERT_NO_THROW(app.InitWindow("Restart", 32, 32));
+    EXPECT_TRUE(app.HasRenderer());
+    app.Clean();
+    app.StopAudioPlayback();
+    EXPECT_EQ(SDL_WasInit(0), 0u);
+}
 
 TEST(CleanupSafety, UninitializedAppCanBeCleanedTwice)
 {

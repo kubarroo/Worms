@@ -13,7 +13,7 @@ void Game::InitWindow(const std::string& title, const int width, const int heigh
     App::InitWindow(title, width, height);
     try
     {
-        scene = std::make_unique<GameScene>(renderer);
+        scene = std::make_unique<GameScene>(renderer.get());
         scene->Initialize();
     }
     catch (...)
@@ -41,6 +41,7 @@ void Game::Render()
 
 void Game::Clean() noexcept
 {
+    StopAudioPlayback();
     scene.reset();
     App::Clean();
 }

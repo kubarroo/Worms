@@ -5,6 +5,14 @@
 
 namespace Sdl
 {
+struct WindowDeleter
+{
+    void operator()(SDL_Window* window) const noexcept { SDL_DestroyWindow(window); }
+};
+struct RendererDeleter
+{
+    void operator()(SDL_Renderer* renderer) const noexcept { SDL_DestroyRenderer(renderer); }
+};
 struct TextureDeleter
 {
     void operator()(SDL_Texture* texture) const noexcept { SDL_DestroyTexture(texture); }
@@ -15,6 +23,8 @@ struct SurfaceDeleter
 };
 using TexturePtr = std::unique_ptr<SDL_Texture, TextureDeleter>;
 using SurfacePtr = std::unique_ptr<SDL_Surface, SurfaceDeleter>;
+using WindowPtr = std::unique_ptr<SDL_Window, WindowDeleter>;
+using RendererPtr = std::unique_ptr<SDL_Renderer, RendererDeleter>;
 
 class SurfaceLock
 {

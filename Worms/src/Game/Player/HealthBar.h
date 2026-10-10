@@ -20,6 +20,7 @@ public:
 private:
     EntityId parentId;
     int initialHealth;
+    // Both pointers borrow the team texture; WormTeam outlives its health bars.
     SDL_Texture* texture;
     SDL_Texture* healthBar = nullptr;
     const Camera& camera;

@@ -31,6 +31,7 @@ private:
     SubscriptionId groundedBeginSubscription = 0;
     SubscriptionId groundedEndSubscription = 0;
     const Camera& camera;
+    // Borrowed from WormTeam, which owns this worm and its health bar.
     SDL_Texture* healthTexture;
     Position spawnPosition;
     std::unique_ptr<Sound> jumpSound;

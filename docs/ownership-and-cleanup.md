@@ -6,6 +6,8 @@ This document defines the proposed contract for phase 1: stabilizing ownership, 
 
 This is the historical phase-1 proposal. For current scene ownership, local physics
 services, and camera-to-turn coordination, see [Scene Lifetimes](Architecture.md).
+For the current SDL and asset ownership contract, see
+[Phase 3 Resource Ownership](resource-ownership.md).
 
 It is based on an earlier project review. While this document was being written, the terminal tool did not allow the files to be read again, so the current code must be verified before implementation. This document does not cover migration to SDL3 or EnTT, introducing a scene, or a full resource manager.
 

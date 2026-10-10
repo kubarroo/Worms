@@ -280,7 +280,7 @@ class InspectableGame : public Game
 public:
     World& Registry() { return GameTestAccess::Registry(*this); }
     b2World& Physics() { return GameTestAccess::Physics(*this); }
-    SDL_Renderer* Renderer() { return renderer; }
+    SDL_Renderer* Renderer() { return renderer.get(); }
     GameScene& Scene() { return GameTestAccess::Scene(*this); }
     const SceneContext& Context()
     {

@@ -2,6 +2,7 @@
 #include <SDL2/SDL.h> /* macOS- and GNU/Linux-specific */
 #include <imgui.h>
 #include <string>
+#include "Core/SDLHandles.h"
 
 class App
 {
@@ -26,9 +27,11 @@ public:
     virtual ~App();
 
 protected:
-    SDL_Window* window = nullptr;
-    SDL_Renderer* renderer = nullptr;
+    // Declaration order keeps the renderer's destruction before its window.
+    Sdl::WindowPtr window;
+    Sdl::RendererPtr renderer;
     bool audioOpened = false;
+    void StopAudioPlayback() noexcept;
     bool ShouldRenderColliders() const { return toggleColliders; }
 
 private:

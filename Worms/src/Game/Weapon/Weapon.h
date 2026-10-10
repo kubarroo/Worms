@@ -72,6 +72,7 @@ private:
     float force = 0;
     bool canShoot = true;
     TexturePtr powerBar;
+    // Borrowed from WeaponManager; cleanup never frees these assets.
     SDL_Texture* projTexture = nullptr;
     Sound* explosionSound = nullptr;
     Sound* collisionSound = nullptr;

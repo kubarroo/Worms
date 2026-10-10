@@ -12,5 +12,6 @@ public:
     ~Music();
 
 private:
+    // Exclusively owned; playback must stop before this wrapper is destroyed.
     Mix_Music* music = NULL;
 };

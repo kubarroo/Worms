@@ -22,6 +22,7 @@ struct Scale
 
 struct Sprite
 {
+    // Borrowed; the texture owner must outlive this component.
     SDL_Texture* texture = nullptr;
 };
 

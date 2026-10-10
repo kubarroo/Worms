@@ -49,17 +49,18 @@ void App::InitSDL(const std::string& title, const int width, const int height)
     sdlInitialized = true;
 
     /* Creates a SDL window */
-    window = SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width,
-                              height, 0);
-    SDL_CHECK(window);
+    window.reset(SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                                  width, height, 0));
+    SDL_CHECK(window.get());
 
-    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    SDL_CHECK(renderer);
+    renderer.reset(SDL_CreateRenderer(window.get(), -1,
+                                      SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC));
+    SDL_CHECK(renderer.get());
 
     SDL_CALL(Mix_OpenAudio(22050, MIX_DEFAULT_FORMAT, 2, 4096));
     audioOpened = true;
 
-    SDL_CALL(SDL_RenderSetLogicalSize(renderer, width, height));
+    SDL_CALL(SDL_RenderSetLogicalSize(renderer.get(), width, height));
 }
 
 void App::InitImGui()
@@ -77,10 +78,10 @@ void App::InitImGui()
     ImGui::StyleColorsDark();
 
     // Setup Platform/Renderer backends
-    imguiPlatformInitialized = ImGui_ImplSDL2_InitForSDLRenderer(window, renderer);
+    imguiPlatformInitialized = ImGui_ImplSDL2_InitForSDLRenderer(window.get(), renderer.get());
     if (!imguiPlatformInitialized)
         throw std::runtime_error("Could not initialize ImGui SDL2 backend");
-    imguiRendererInitialized = ImGui_ImplSDLRenderer2_Init(renderer);
+    imguiRendererInitialized = ImGui_ImplSDLRenderer2_Init(renderer.get());
     if (!imguiRendererInitialized)
         throw std::runtime_error("Could not initialize ImGui renderer backend");
 }
@@ -121,9 +122,9 @@ void App::PostRender()
     Terminal::Get().Render();
 
     ImGui::Render();
-    SDL_RenderSetScale(renderer, io->DisplayFramebufferScale.x, io->DisplayFramebufferScale.y);
-    ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer);
-    SDL_RenderPresent(renderer);
+    SDL_RenderSetScale(renderer.get(), io->DisplayFramebufferScale.x, io->DisplayFramebufferScale.y);
+    ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer.get());
+    SDL_RenderPresent(renderer.get());
 }
 
 void App::PreRender()
@@ -146,13 +147,23 @@ void App::PreRender()
     ImGui::EndMainMenuBar();
 
     // Rendering
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderClear(renderer);
+    SDL_SetRenderDrawColor(renderer.get(), 255, 255, 255, 255);
+    SDL_RenderClear(renderer.get());
+}
+
+void App::StopAudioPlayback() noexcept
+{
+    if (audioOpened)
+    {
+        Mix_HaltMusic();
+        Mix_HaltChannel(-1);
+    }
 }
 
 void App::Clean() noexcept
 {
     isRunning = false;
+    StopAudioPlayback();
     if (imguiContext)
     {
         auto* previousContext = ImGui::GetCurrentContext();
@@ -175,15 +186,11 @@ void App::Clean() noexcept
     }
     if (audioOpened)
     {
-        Mix_HaltMusic();
-        Mix_HaltChannel(-1);
         Mix_CloseAudio();
         audioOpened = false;
     }
-    SDL_DestroyRenderer(renderer);
-    renderer = nullptr;
-    SDL_DestroyWindow(window);
-    window = nullptr;
+    renderer.reset();
+    window.reset();
     if (sdlInitialized)
     {
         SDL_Quit();
