@@ -9,6 +9,7 @@
 #include "Core/Physics/ContactManager.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Weapon/Projectile.h"
+#include "Core/Audio/Audio.h"
 
 Projectile::Projectile( float posX, float posY, float vX, float vY ) : startPosX( posX ), startPosY( posY ), startVelX( vX ), startVelY( vY )
 {
@@ -23,7 +24,7 @@ void Projectile::Update()
 		 timer.Measure() > params.explosionOffset && params.explosionOffset != 0 )
 	{
 		createSensor = false;
-		if ( explosionSound ) explosionSound->Play();
+		if ( explosionSound ) Context().audio.Play(*explosionSound);
         Context().objects.QueueAdd(std::make_unique<ParticleSystem>(
             "particle.png", params.explosionRadius * 3.f, pos.x, pos.y, 100));
 
@@ -59,7 +60,7 @@ void Projectile::onCollision( b2Contact* constact )
 {
     Context().contacts.RemoveEvent(collisionSubscription);
     collisionSubscription = 0;
-	if ( collisionSound ) collisionSound->Play();
+	if ( collisionSound ) Context().audio.Play(*collisionSound);
 	if ( params.explosionOffset == 0 )
 		createSensor = true;
 

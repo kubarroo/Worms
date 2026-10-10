@@ -2,6 +2,8 @@
 #include "Game/Player/Worm.h"
 #include <memory>
 
+class Audio;
+
 class WormTeam
 {
     friend class Worm;
@@ -11,7 +13,7 @@ public:
 
     explicit WormTeam(TexturePtr texture) : healthBarTexture(std::move(texture)) {}
 
-    void Initialise(ResourceManager& resources);
+    void Initialise(ResourceManager& resources, Audio& audio);
     void AddWorm(std::unique_ptr<Worm> worm);
     void RemoveWorm(Worm* worm);
     void ChangeActiveWorm();
@@ -36,6 +38,7 @@ private:
     std::vector<Worm*> wormsToDelete;
     // Borrowed from ResourceManager; survives deletion of the last worm/team.
     Sound* dieSound = nullptr;
+    Audio* audio = nullptr;
     bool initialized = false;
     int activeWorm = 0;
 };

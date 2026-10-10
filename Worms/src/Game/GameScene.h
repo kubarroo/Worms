@@ -17,7 +17,8 @@ class GameObject;
 class GameScene : public ObjectCommands
 {
 public:
-    GameScene(SDL_Renderer* renderer, ResourceManager& resources);
+    GameScene(SDL_Renderer* renderer, ResourceManager& resources,
+              Renderer2D& rendering, Audio& audio, Input& input);
     ~GameScene() override;
     GameScene(const GameScene&) = delete;
     GameScene& operator=(const GameScene&) = delete;
@@ -47,6 +48,9 @@ private:
 
     SDL_Renderer* renderer;
     ResourceManager& resources;
+    Renderer2D& rendering;
+    Audio& audio;
+    Input& input;
     bool ownsRuntime = false;
     bool initialized = false;
     bool processingFrame = false;

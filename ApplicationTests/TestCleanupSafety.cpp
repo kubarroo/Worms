@@ -175,11 +175,27 @@ TEST(CleanupSafety, UninitializedAppCanBeCleanedTwice)
     EXPECT_FALSE(app.HasRenderer());
 }
 
+TEST(CleanupSafety, EventHandlingOutsidePlatformLifetimeIsANoOp)
+{
+    ScopedHint video(SDL_HINT_VIDEODRIVER, "dummy");
+    ScopedHint audio(SDL_HINT_AUDIODRIVER, "dummy");
+    ScopedHint renderer(SDL_HINT_RENDER_DRIVER, "software");
+    TestApp app;
+    EXPECT_NO_THROW(app.HandleEvents());
+    EXPECT_EQ(SDL_WasInit(0), 0u);
+    ASSERT_NO_THROW(app.InitWindow("Events test", 32, 32));
+    EXPECT_NO_THROW(app.HandleEvents());
+    app.Clean();
+    EXPECT_NO_THROW(app.HandleEvents());
+    EXPECT_EQ(SDL_WasInit(0), 0u);
+}
+
 TEST(CleanupSafety, AppCanBeCleanedAfterVideoInitializationFails)
 {
     ScopedHint videoDriver(SDL_HINT_VIDEODRIVER, "worms-nonexistent-driver");
     TestApp app;
     EXPECT_THROW(app.InitWindow("Test", 32, 32), SDL_Exception);
+    EXPECT_NO_THROW(app.HandleEvents());
     EXPECT_NO_THROW(app.Clean());
     EXPECT_NO_THROW(app.Clean());
     EXPECT_FALSE(app.HasWindow());
@@ -244,15 +260,17 @@ TEST(CleanupSafety, AppDestructorReleasesPlatformWithoutExplicitCleanup)
 
 TEST(CleanupSafety, InputResetClearsAxesHeldActionsAndPendingWeaponChange)
 {
-    auto& input = Input::Get();
+    Input input;
+    SdlInputAdapter adapter(input);
     input.Reset();
     SDL_Event event{};
+    event.type = SDL_KEYDOWN;
     for (auto key : {SDL_SCANCODE_D, SDL_SCANCODE_W, SDL_SCANCODE_UP,
                      SDL_SCANCODE_RIGHT, SDL_SCANCODE_SPACE, SDL_SCANCODE_LSHIFT,
                      SDL_SCANCODE_E})
     {
         event.key.keysym.scancode = key;
-        input.UpdateInputsDown(event);
+        adapter.ProcessEvent(event, false);
     }
     EXPECT_TRUE(input.Jump());
     EXPECT_TRUE(input.UseAction());

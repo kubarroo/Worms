@@ -1,7 +1,8 @@
 #include "Game/Player/HealthBar.h"
 #include "ECS/World.h"
 #include "ExceptionHandling/SDL_Exception.h"
-#include <SDL_image.h>
+#include "Core/Renderer2D.h"
+#include <algorithm>
 
 HealthBar::HealthBar(EntityId parentId, const Camera& camera, int health, SDL_Texture* texture)
     : parentId(parentId), initialHealth(health), texture(texture), camera(camera)
@@ -36,17 +37,16 @@ void HealthBar::Render()
     }
     auto& pos = world->GetComponent<Position>(objectId);
     auto& hp = world->GetComponent<Health>(objectId);
-    SDL_Point size;
-    SDL_QueryTexture(healthBar, NULL, NULL, &size.x, &size.y);
+    auto size = Context().rendering.TextureSize(healthBar);
 
-    double hpPrc = static_cast<float>(hp.current) / static_cast<float>(hp.max);
-    SDL_Rect slice(0, 0, static_cast<int>(size.x) * hpPrc, size.y);
+    double hpPrc = hp.max > 0 ? std::clamp(static_cast<double>(hp.current) / hp.max, 0.0, 1.0) : 0.0;
+    RenderRect slice(0, 0, static_cast<int>(size.x * hpPrc), size.y);
 
-    SDL_Rect renderQuad(400 + static_cast<int>((pos.x - camera.X()) * 100.0) - size.x / 2,
+    RenderRect renderQuad(400 + static_cast<int>((pos.x - camera.X()) * 100.0) - size.x / 2,
                         300 - static_cast<int>((pos.y - camera.Y()) * 100.0) - size.y / 2, slice.w,
                         slice.h);
 
-    SDL_RenderCopy(renderer, healthBar, &slice, &renderQuad);
+    Context().rendering.DrawSprite(healthBar, renderQuad, slice);
 }
 
 void HealthBar::CleanUp()

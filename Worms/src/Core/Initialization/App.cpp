@@ -11,7 +11,7 @@
 #include <stdexcept>
 
 
-App::App() {}
+App::App() : inputAdapter(input) {}
 
 void App::SetAssetRoot(std::filesystem::path root)
 {
@@ -29,6 +29,12 @@ ResourceManager& App::Resources() const
     return *resources;
 }
 
+Renderer2D& App::Graphics() const
+{
+    if (!graphics) throw std::logic_error("Renderer adapter is unavailable");
+    return *graphics;
+}
+
 App::~App()
 {
     App::Clean();
@@ -41,6 +47,9 @@ void App::InitWindow(const std::string& title, const int width, const int height
     try
     {
         InitSDL(title, width, height);
+        graphics = std::make_unique<Renderer2D>(renderer.get());
+        graphics->SetLogicalSize(width, height);
+        inputAdapter.Reset();
         resources = std::make_unique<ResourceManager>(renderer.get(), assetRoot);
         InitImGui();
         isRunning = true;
@@ -77,8 +86,6 @@ void App::InitSDL(const std::string& title, const int width, const int height)
 
     SDL_CALL(Mix_OpenAudio(22050, MIX_DEFAULT_FORMAT, 2, 4096));
     audioOpened = true;
-
-    SDL_CALL(SDL_RenderSetLogicalSize(renderer.get(), width, height));
 }
 
 void App::InitImGui()
@@ -111,20 +118,18 @@ void App::Update()
 
 void App::HandleEvents()
 {
+    if (!io || !sdlInitialized || !imguiPlatformInitialized)
+        return;
+    inputAdapter.BeginFrame(io->WantCaptureKeyboard);
     SDL_Event ev;
     while (SDL_PollEvent(&ev))
     {
         ImGui_ImplSDL2_ProcessEvent(&ev);
+        inputAdapter.ProcessEvent(ev, io->WantCaptureKeyboard);
         switch (ev.type)
         {
         case SDL_QUIT:
             isRunning = false;
-            break;
-        case SDL_KEYUP:
-            Input::Get().UpdateInputsUp(ev);
-            break;
-        case SDL_KEYDOWN:
-            Input::Get().UpdateInputsDown(ev);
             break;
         }
     }
@@ -140,9 +145,9 @@ void App::PostRender()
     Terminal::Get().Render();
 
     ImGui::Render();
-    SDL_RenderSetScale(renderer.get(), io->DisplayFramebufferScale.x, io->DisplayFramebufferScale.y);
+    Graphics().SetScale(io->DisplayFramebufferScale.x, io->DisplayFramebufferScale.y);
     ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer.get());
-    SDL_RenderPresent(renderer.get());
+    Graphics().Present();
 }
 
 void App::PreRender()
@@ -165,16 +170,14 @@ void App::PreRender()
     ImGui::EndMainMenuBar();
 
     // Rendering
-    SDL_SetRenderDrawColor(renderer.get(), 255, 255, 255, 255);
-    SDL_RenderClear(renderer.get());
+    Graphics().Clear({255, 255, 255, 255});
 }
 
 void App::StopAudioPlayback() noexcept
 {
     if (audioOpened)
     {
-        Mix_HaltMusic();
-        Mix_HaltChannel(-1);
+        audio.StopAll();
     }
 }
 
@@ -208,6 +211,7 @@ void App::Clean() noexcept
         Mix_CloseAudio();
         audioOpened = false;
     }
+    graphics.reset();
     renderer.reset();
     window.reset();
     if (sdlInitialized)
@@ -216,6 +220,6 @@ void App::Clean() noexcept
         sdlInitialized = false;
     }
     toggleColliders = false;
-    Input::Get().Reset();
+    inputAdapter.Reset();
     Time::ResetFrameClock();
 }

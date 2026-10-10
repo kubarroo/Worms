@@ -8,10 +8,10 @@ public:
     Music(const std::string& fileName);
     Music(const Music&) = delete;
     Music& operator=(const Music&) = delete;
-    void Play(unsigned int times = 1);
     ~Music();
 
 private:
+    friend class Audio;
     // Exclusively owned; playback must stop before this wrapper is destroyed.
     Mix_Music* music = NULL;
 };

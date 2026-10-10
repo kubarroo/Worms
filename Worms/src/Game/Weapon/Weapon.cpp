@@ -1,5 +1,7 @@
 #include <algorithm>
 #include "Core/Input.h"
+#include "Core/Audio/Audio.h"
+#include "Core/Renderer2D.h"
 #include "Core/ResourceManager.h"
 #include "Core/Time.h"
 #include "ExceptionHandling/SDL_Exception.h"
@@ -20,6 +22,7 @@ void Weapon::Initialise(const SceneContext& context)
 		world->AddComponent<Sprite>( objectId );
 		powerBar = context.resources.GetTexture("powerBar.png");
 		canShoot = true;
+        observedInputInterruption = context.input.InterruptionCount();
 	}
 	catch (...)
 	{
@@ -57,6 +60,16 @@ std::optional<Position> Weapon::GetParentPosition()
 
 void Weapon::Update()
 {
+    if (!HasEntity()) return;
+    const auto& input = Context().input;
+    const auto interruption = input.InterruptionCount();
+    // A skipped update must not lose cancellation of a previously charged shot.
+    if (!input.Enabled() || input.Interrupted() || observedInputInterruption != interruption)
+    {
+        observedInputInterruption = interruption;
+        force = 0;
+        return;
+    }
 	auto parentPosition = GetParentPosition();
 	if (!parentPosition || !canShoot) return;
 
@@ -64,12 +77,12 @@ void Weapon::Update()
 	auto& rot = world->GetComponent<Rotation>( objectId );
 	pos = *parentPosition;
 
-	rot.degree += Input::Get().Vertical() * static_cast<float>(Time::deltaTime) * 100.f;
+	rot.degree += Context().input.Vertical() * static_cast<float>(Time::deltaTime) * 100.f;
 
 	pos.x += 0.1f * cosf( rot.degree * static_cast<float>(M_PI) / 180 );
 	pos.y += 0.1f * sinf( rot.degree * static_cast<float>(M_PI) / 180 );
 
-	if ( Input::Get().UseAction() )
+	if ( Context().input.UseAction() )
 	{
 		if ( force < 1 )
 			force += static_cast<float>(Time::deltaTime);
@@ -79,7 +92,7 @@ void Weapon::Update()
 		if ( force )
 		{
 			canShoot = false;
-			if ( shootingSound ) shootingSound->Play();
+			if ( shootingSound ) Context().audio.Play(*shootingSound);
             auto projectile = std::make_unique<Projectile>( pos.x + 0.5f * cosf( rot.degree * static_cast<float>(M_PI) / 180 ),
 				pos.y + 0.5f * sinf( rot.degree * static_cast<float>(M_PI) / 180 ),
 				force * cosf( rot.degree * static_cast<float>(M_PI) / 180 ),
@@ -106,23 +119,22 @@ void Weapon::Render()
 	if (!GetParentPosition() || !powerBar) return;
 	auto& pos = world->GetComponent<Position>( objectId );
 	auto& rot = world->GetComponent<Rotation>( objectId );
-	SDL_Point size;
-	SDL_QueryTexture( powerBar, NULL, NULL, &size.x, &size.y );
+	auto size = Context().rendering.TextureSize(powerBar);
 
-	SDL_Rect slice(
+	RenderRect slice(
 		0,
 		0,
 		static_cast<int>(size.x * force),
 		size.y );
 
-	SDL_Rect renderQuad(
+	RenderRect renderQuad(
 		400 + static_cast<int>((pos.x - camera.X()) * 100.0),
 		300 - static_cast<int>((pos.y - camera.Y()) * 100.0) - size.y / 2,
 		slice.w,
 		slice.h );
 
-	SDL_Point centre( 0, size.y / 2 );
+	RenderPoint centre( 0, size.y / 2 );
 
 
-	SDL_RenderCopyEx( renderer, powerBar, &slice, &renderQuad, -rot.degree, &centre, SDL_FLIP_NONE );
+	Context().rendering.DrawSprite(powerBar, renderQuad, slice, -rot.degree, centre);
 }

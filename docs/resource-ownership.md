@@ -1,6 +1,6 @@
 # Phase 3 Resource Ownership Contract
 
-This is the current contract for phase 3, steps 1 through 4. The older
+This is the current contract for phase 3, steps 1 through 5. The older
 `ownership-and-cleanup.md` is a historical phase-1 proposal. Scene ownership is
 described in `Architecture.md`.
 
@@ -31,7 +31,8 @@ described in `Architecture.md`.
 | Team death sound | ResourceManager | WormTeam and playback |
 | Particle texture | ResourceManager | ParticleSystem and its particles' Sprite components |
 | Mutable terrain surface and current texture | Map | Contour generation and its Sprite component |
-| Music | ResourceManager through Music | GameScene controls playback |
+| Music | ResourceManager through Music | GameScene requests playback through Audio |
+| Renderer2D, Audio, Input and SDL input translator | App | SceneContext and gameplay |
 
 GameScene detaches borrowers; it never clears the shared cache. App releases the cache
 after destroying the scene. WeaponManager owns configurations, not asset caches.
@@ -47,7 +48,7 @@ not a shared mutable cache entry.
 3. App releases ResourceManager and its cache after all scene borrowers.
 4. App shuts down ImGui backends and its context.
 5. App closes the audio device.
-6. App resets the renderer, then the window.
+6. App releases Renderer2D, then resets the native renderer and window.
 7. App calls SDL_Quit for its initialized runtime.
 
 App::Clean also stops playback so it works independently. Only successfully acquired
@@ -109,3 +110,36 @@ borrow that texture. Different teams have different textures. Removing a worm le
 the team texture alive. CleanUp removes borrowers but retains the texture for team
 restart; destroying the team releases it. Member declaration order also destroys
 worms before the texture if destruction occurs without an explicit CleanUp call.
+
+## Platform Adapters
+
+Renderer2D borrows the native renderer and draws sprites, optional source rectangles,
+rotation/pivots, and debug lines. Coordinates remain screen-space integers; the camera
+and rendering systems retain world-to-screen conversion. It never owns or changes
+borrowed textures. Native handles remain available for ImGui, asset loading, and
+private mutable texture generation. These native resource operations have not been
+moved behind a new asset/backend hierarchy.
+
+Audio plays borrowed Sound/Music assets; those wrappers only own decoded data.
+Playback counts are total plays: 1 means once, -1 means indefinitely; zero and values
+below -1 are rejected. Sound playback returns a channel index or -1 if unavailable.
+Stops are idempotent, including before device initialization or after shutdown.
+Volume is normalized to [0, 1]. The current mixer and stop operations remain global:
+simultaneous scenes do not have isolated audio buses.
+
+Input stores platform-independent actions per App. SdlInputAdapter translates events
+after forwarding them to ImGui. BeginFrame clears press/release edges, not held state.
+One-shot actions consume a press once per frame; repeated SDL keydown events are ignored.
+Opposite movement keys cancel, and releasing one restores the other held direction.
+Existing key bindings are retained; disabled team/worm hotkeys are not activated.
+
+Focus loss and ImGui keyboard capture clear actions and disable gameplay input.
+Re-enabling requires a fresh non-repeat keydown. An interruption is retained for the
+current frame even if focus returns in the same event batch. A persistent interruption
+counter lets Weapon cancel charge even when its updates were skipped; BeginFrame and
+Reset never erase that counter. Scene restart resets action state, while full
+platform initialization/shutdown also resets the SDL translator.
+
+App::HandleEvents is a no-op before platform initialization and after cleanup,
+including failed startup. Renderer2D::DrawLine uses the backend directly without
+allocating a temporary vector.

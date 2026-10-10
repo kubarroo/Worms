@@ -6,6 +6,7 @@
 #include "Game/Weapon/Projectile.h"
 #include "WeaponImpl.h"
 #include <optional>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -70,6 +71,7 @@ private:
     std::optional<EntityHandle> parentId;
     float force = 0;
     bool canShoot = true;
+    std::uint64_t observedInputInterruption = 0;
     // Borrowed from ResourceManager; cleanup never frees these assets.
     SDL_Texture* powerBar = nullptr;
     SDL_Texture* projTexture = nullptr;

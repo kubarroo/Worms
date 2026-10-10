@@ -1,12 +1,14 @@
 #include "Game/Player/WormTeam.h"
+#include "Core/Audio/Audio.h"
 #include "Core/ResourceManager.h"
 #include <algorithm>
 #include <stdexcept>
 
-void WormTeam::Initialise(ResourceManager& resources)
+void WormTeam::Initialise(ResourceManager& resources, Audio& audio)
 {
     if (initialized)
         throw std::logic_error("WormTeam is already initialized");
+    this->audio = &audio;
     dieSound = &resources.GetSound("scream.wav");
     initialized = true;
 }
@@ -50,7 +52,7 @@ void WormTeam::RemoveWorm(Worm* worm)
     (*it)->CleanUp();
     worms.erase(it);
     if (dieSound)
-        dieSound->Play();
+        audio->Play(*dieSound);
 
     if (worms.empty())
     {
@@ -135,6 +137,7 @@ void WormTeam::CleanUp()
 
     worms.clear();
     dieSound = nullptr;
+    audio = nullptr;
     initialized = false;
     activeWorm = 0;
 }

@@ -1,20 +1,20 @@
 # Scene Lifetimes
 
 `App` owns the platform and ResourceManager: SDL initialization, window, renderer,
-events, ImGui, and shared file assets.
+events, ImGui, shared file assets, and the rendering/audio/input adapters.
 `Game` owns `GameScene` and releases it before the platform is shut down.
 
 ## Dependency Context
 
 `SceneContext` borrows the renderer, ECS world, physics world, `ObjectCommands`,
-collider factory, contact manager, and ResourceManager.
+collider factory, contact manager, ResourceManager, Renderer2D, Audio, and Input.
 It is not a resource owner or a global service locator. Objects store a copy of
 the context, so a temporary context value is safe; its referenced dependencies
 must still outlive the object. A null renderer is supported for headless tests.
 
 `ObjectCommands` exposes only queued addition and removal. Gameplay objects
 cannot access scene internals or perform immediate insertion through this API.
-Input, frame timing, and logging still use global services. Physics services are
+Input is per-application and supplied explicitly. Frame timing and logging still use global services. Physics services are
 scene-owned: `ColliderFactory` is constructed with a world and contact manager,
 and cannot be rebound. Worm, projectile, and map initialization checks that both
 services match the context before allocation. Collider event methods use the
@@ -25,12 +25,12 @@ contact manager supplied by the factory, never a global registry.
 | Owner | Owned resources | Borrowed dependencies |
 | --- | --- | --- |
 | `App` / `ResourceManager` | Platform and shared textures, sounds, music | None |
-| `GameScene` | ECS, physics world, collider factory, contact manager, camera, weapon, map, projectiles, particles, managers | App renderer and ResourceManager, music |
+| `GameScene` | ECS, physics world, collider factory, contact manager, camera, weapon, map, projectiles, particles, managers | App renderer, ResourceManager and adapters, music |
 | `WormManager` | Teams | Context, camera, weapon |
-| `WormTeam` | Worms, health-bar texture | Cached death sound |
+| `WormTeam` | Worms, health-bar texture | Cached death sound and Audio |
 | `Worm` | Health bar, collider wrapper | Cached sprite and jump sound, camera, team health-bar texture, context |
 | `Camera` | Focus point | Context |
-| `WeaponManager` | Weapon configurations | ResourceManager, scene-owned weapon |
+| `WeaponManager` | Weapon configurations | ResourceManager, Input, scene-owned weapon |
 | `Weapon` / `Projectile` | Object-specific entities and physics | Cached textures and sounds, context |
 | `ParticleSystem` | Particle entities and effect state | Cached particle texture, context |
 

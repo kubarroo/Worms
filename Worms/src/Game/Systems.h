@@ -2,6 +2,7 @@
 #include "Core/Camera/Camera.h"
 #include "ECS/System.h"
 #include "Game/Components.h"
+#include "Core/Renderer2D.h"
 
 class Movement : public System
 {
@@ -27,7 +28,7 @@ public:
 class SpriteRenderer : public System
 {
 public:
-    SpriteRenderer(ComponentManager& componentManager, SDL_Renderer* renderer, Camera& camera)
+    SpriteRenderer(ComponentManager& componentManager, Renderer2D& renderer, Camera& camera)
         : System(componentManager), renderer(renderer), camera(camera)
     {
         systemSignature.set(componentManager.GetComponentId<Position>(), true);
@@ -44,15 +45,14 @@ public:
             {
                 continue;
             }
-            SDL_Point size;
-            SDL_QueryTexture(sprites.GetData(ent).texture, NULL, NULL, &size.x, &size.y);
+            auto size = renderer.TextureSize(sprites.GetData(ent).texture);
 
             auto scale = componentManager.TryGetComponent<Scale>(ent);
             float scaleFactor = 1.f;
             if (scale.has_value())
                 scaleFactor = scale->get().size;
 
-            SDL_Rect destination;
+            RenderRect destination;
             destination.x = static_cast<int>(400 + 100.0 * (positions.GetData(ent).x - camera.X()) -
                                              size.x / 2 * scaleFactor);
             destination.y = static_cast<int>(300 - 100.0 * (positions.GetData(ent).y - camera.Y()) -
@@ -61,17 +61,13 @@ public:
             destination.h = static_cast<int>(size.y * scaleFactor);
 
             auto angle = componentManager.TryGetComponent<Rotation>(ent);
-            if (angle.has_value())
-                SDL_RenderCopyEx(renderer, sprites.GetData(ent).texture, NULL, &destination,
-                                 -angle.value().get().degree, NULL,
-                                 SDL_RendererFlip::SDL_FLIP_NONE);
-            else
-                SDL_RenderCopy(renderer, sprites.GetData(ent).texture, NULL, &destination);
+            renderer.DrawSprite(sprites.GetData(ent).texture, destination, {},
+                                angle ? -angle->get().degree : 0.0);
         }
     }
 
 private:
-    SDL_Renderer* renderer;
+    Renderer2D& renderer;
     Camera& camera;
 };
 

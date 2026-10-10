@@ -3,8 +3,8 @@
 #include <stdexcept>
 #include <utility>
 
-WeaponManager::WeaponManager(ResourceManager& resources, Weapon& weapon)
-    : resources(resources), weapon(&weapon)
+WeaponManager::WeaponManager(ResourceManager& resources, Weapon& weapon, Input& input)
+    : resources(resources), input(input), weapon(&weapon)
 {
 }
 
@@ -56,7 +56,7 @@ void WeaponManager::Update()
     if (!initialized)
         return;
 
-    currentWeapon += Input::Get().ChangeWeapon();
+    currentWeapon += input.ChangeWeapon();
     if (currentWeapon < 0)
         currentWeapon = static_cast<int>(weapons.size()) - 1;
     if (currentWeapon >= static_cast<int>(weapons.size()))

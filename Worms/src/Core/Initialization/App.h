@@ -4,6 +4,10 @@
 #include <string>
 #include "Core/SDLHandles.h"
 #include <filesystem>
+#include "Core/Input.h"
+#include "Core/SdlInputAdapter.h"
+#include "Core/Renderer2D.h"
+#include "Core/Audio/Audio.h"
 
 class ResourceManager;
 
@@ -38,11 +42,18 @@ protected:
     bool audioOpened = false;
     void StopAudioPlayback() noexcept;
     ResourceManager& Resources() const;
+    Renderer2D& Graphics() const;
+    Audio& AudioOutput() { return audio; }
+    Input& Inputs() { return input; }
     bool ShouldRenderColliders() const { return toggleColliders; }
 
 private:
     std::filesystem::path assetRoot = ".";
     std::unique_ptr<ResourceManager> resources;
+    std::unique_ptr<Renderer2D> graphics;
+    Audio audio;
+    Input input;
+    SdlInputAdapter inputAdapter;
     void InitSDL(const std::string& title, const int width, const int height);
     void InitImGui();
     ImGuiIO* io = nullptr;

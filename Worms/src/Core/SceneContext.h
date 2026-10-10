@@ -8,6 +8,9 @@ class GameObject;
 class ColliderFactory;
 class ContactManager;
 class ResourceManager;
+class Renderer2D;
+class Audio;
+class Input;
 
 // Commands borrow their recipient; ownership transfers only through QueueAdd.
 class ObjectCommands
@@ -29,4 +32,7 @@ struct SceneContext
     ColliderFactory& colliders;
     ContactManager& contacts;
     ResourceManager& resources;
+    Renderer2D& rendering;
+    Audio& audio;
+    Input& input;
 };

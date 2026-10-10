@@ -11,7 +11,7 @@
 class WeaponManager
 {
 public:
-    WeaponManager(ResourceManager& resources, Weapon& weapon);
+    WeaponManager(ResourceManager& resources, Weapon& weapon, Input& input);
 
     void Initialise();
 	void Update();
@@ -20,6 +20,7 @@ public:
 private:
 	void ApplyCurrentWeapon();
     ResourceManager& resources;
+    Input& input;
 	Weapon* weapon = nullptr;
 	int currentWeapon = 0;
 	bool initialized = false;

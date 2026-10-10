@@ -18,7 +18,8 @@
 #include "Core/Time.h"
 #include "Terminal/Terminal.h"
 #include <SDL2/SDL.h>
-#include <SDL_mixer.h>
+#include "Core/Renderer2D.h"
+#include "Core/Audio/Audio.h"
 #include <algorithm>
 #include <iterator>
 #include <stdexcept>
@@ -78,12 +79,13 @@ template <typename Cleanup> void TryCleanup(const char* operation, Cleanup&& cle
 }
 } // namespace
 
-GameScene::GameScene(SDL_Renderer* renderer, ResourceManager& resources)
-    : renderer(renderer), resources(resources)
+GameScene::GameScene(SDL_Renderer* renderer, ResourceManager& resources,
+                     Renderer2D& rendering, Audio& audio, Input& input)
+    : renderer(renderer), resources(resources), rendering(rendering), audio(audio), input(input)
 {
     if (!renderer)
         throw std::invalid_argument("Scene requires a renderer");
-    if (resources.Renderer() != renderer)
+    if (resources.Renderer() != renderer || rendering.Native() != renderer)
         throw std::invalid_argument("Scene and resource manager require the same renderer");
 }
 
@@ -111,18 +113,18 @@ void GameScene::Initialize()
         contacts = std::make_unique<ContactManager>();
         colliders = std::make_unique<ColliderFactory>(*physicsWorld, *contacts);
         context = std::make_unique<SceneContext>(renderer, *world, *physicsWorld, *this, *colliders,
-                                                 *contacts, resources);
+                                                 *contacts, resources, rendering, audio, input);
         auto camera = std::make_unique<Camera>();
         auto cameraPtr = camera.get();
         this->camera = cameraPtr;
         QueueAdd(std::move(camera));
-        world->RegisterSystem<SpriteRenderer>(renderer, *cameraPtr);
+        world->RegisterSystem<SpriteRenderer>(rendering, *cameraPtr);
 
         setUpDebugDraw(*cameraPtr);
         auto weapon = std::make_unique<Weapon>(*cameraPtr);
         auto* weaponPtr = weapon.get();
         QueueAdd(std::move(weapon));
-        weaponManager = std::make_unique<WeaponManager>(resources, *weaponPtr);
+        weaponManager = std::make_unique<WeaponManager>(resources, *weaponPtr, input);
         wormManager = std::make_unique<WormManager>(*context, *cameraPtr, *weaponPtr);
         wormManager->Initialise();
         wormManager->CreateTeam(4);
@@ -142,8 +144,8 @@ void GameScene::Initialize()
         cameraPtr->ChangeTarget(wormManager->GetActiveWormId());
 
         music = &resources.GetMusic("Rick_Roll.ogg");
-        music->Play();
-        Input::Get().Reset();
+        audio.Play(*music);
+        input.Reset();
         Time::ResetFrameClock();
         initialized = true;
     }
@@ -156,7 +158,7 @@ void GameScene::Initialize()
 
 void GameScene::setUpDebugDraw(Camera& camera)
 {
-    b2DebugDraw = std::make_unique<b2ColliderDraw>(renderer, camera);
+    b2DebugDraw = std::make_unique<b2ColliderDraw>(rendering, camera);
     physicsWorld->SetDebugDraw(b2DebugDraw.get());
     physicsWorld->SetContactListener(contacts.get());
 }
@@ -192,7 +194,9 @@ void GameScene::ValidateObject(const GameObject& object) const
     if (object.context &&
         (&object.context->physics != physicsWorld.get() || object.context->renderer != renderer ||
          &object.context->colliders != colliders.get() ||
-         &object.context->contacts != contacts.get() || &object.context->resources != &resources))
+         &object.context->contacts != contacts.get() || &object.context->resources != &resources ||
+         &object.context->rendering != &rendering || &object.context->audio != &audio ||
+         &object.context->input != &input))
         throw std::invalid_argument("Object uses different scene services");
 }
 
@@ -371,11 +375,7 @@ void GameScene::CleanUp() noexcept
     initialized = false;
     cleaningUp = true;
 
-    if (Mix_QuerySpec(nullptr, nullptr, nullptr))
-    {
-        Mix_HaltMusic();
-        Mix_HaltChannel(-1);
-    }
+    audio.StopAll();
 
     if (physicsWorld)
     {

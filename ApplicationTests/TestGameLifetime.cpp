@@ -337,6 +337,9 @@ private:
 class InspectableGame : public Game
 {
 public:
+    using App::Graphics;
+    using App::AudioOutput;
+    using App::Inputs;
     World& Registry() { return GameTestAccess::Registry(*this); }
     b2World& Physics() { return GameTestAccess::Physics(*this); }
     SDL_Renderer* Renderer() { return renderer.get(); }
@@ -348,16 +351,18 @@ public:
     }
     SceneContext ContextWith(World& world)
     {
-        return {Renderer(), world, Physics(), Scene(), Context().colliders, Context().contacts, Context().resources};
+        return {Renderer(), world, Physics(), Scene(), Context().colliders, Context().contacts,
+                Context().resources, Graphics(), AudioOutput(), Inputs()};
     }
     SceneContext ContextWith(ResourceManager& resources)
     {
         return {resources.Renderer(), Registry(), Physics(), Scene(),
-                Context().colliders, Context().contacts, resources};
+                Context().colliders, Context().contacts, resources,
+                Graphics(), AudioOutput(), Inputs()};
     }
     SceneContext ContextWith(SDL_Renderer* renderer)
     {
-        return {renderer, Registry(), Physics(), Scene(), Context().colliders, Context().contacts, Context().resources};
+        return {renderer, Registry(), Physics(), Scene(), Context().colliders, Context().contacts, Context().resources, Graphics(), AudioOutput(), Inputs()};
     }
     auto Objects() const { return GameTestAccess::Objects(*this); }
     auto PendingAddCount() const { return GameTestAccess::PendingAddCount(*this); }
@@ -473,7 +478,7 @@ protected:
                               SDL_TEXTUREACCESS_STATIC, 40, 10));
         ASSERT_NE(texture.get(), nullptr);
         team = std::make_unique<WormTeam>(std::move(texture));
-        team->Initialise(game.Assets());
+        team->Initialise(game.Assets(), game.AudioOutput());
     }
 
     Worm* AddTrackedWorm()
@@ -517,7 +522,8 @@ TEST_F(GameLifetime, SecondSceneOwnsIndependentPhysicsServicesAndCleanup)
 {
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     {
-        GameScene second(game.Renderer(), game.Assets());
+        GameScene second(game.Renderer(), game.Assets(),
+                        game.Graphics(), game.AudioOutput(), game.Inputs());
         ASSERT_NO_THROW(second.Initialize());
         EXPECT_NE(&second.Context().physics, &game.Context().physics);
         EXPECT_NE(&second.Context().colliders, &game.Context().colliders);
@@ -546,7 +552,8 @@ TEST_F(GameLifetime, FailedSecondSceneStartupDoesNotInvalidateRunningPhysicsServ
     const auto active = GameTestAccess::ActiveWorm(game);
     SceneAssetsWithout assets("powerBar.png");
     ResourceManager resources(game.Renderer(), assets.Directory());
-    GameScene second(game.Renderer(), resources);
+    GameScene second(game.Renderer(), resources,
+                        game.Graphics(), game.AudioOutput(), game.Inputs());
     {
         ScopedWorkingDirectory directory(assets.Directory());
         EXPECT_THROW(second.Initialize(), SDL_Exception);
@@ -620,7 +627,8 @@ TEST_F(GameLifetime, SceneDestructionReleasesGameplayButKeepsPlatformAlive)
     {
         SCOPED_TRACE(cycle);
         {
-            GameScene scene(game.Renderer(), game.Assets());
+            GameScene scene(game.Renderer(), game.Assets(),
+                        game.Graphics(), game.AudioOutput(), game.Inputs());
             scene.Initialize();
             EXPECT_EQ(GameTestAccess::SubscriptionCount(scene), subscriptions);
             EXPECT_THROW(scene.Initialize(), std::logic_error);
@@ -644,7 +652,8 @@ TEST_F(GameLifetime, FailedSceneInitializationRollsBackAndCanBeRetried)
     GameTestAccess::ResetScene(game);
     SceneAssetsWithout assets("worms.png");
     ResourceManager resources(game.Renderer(), assets.Directory());
-    GameScene scene(game.Renderer(), resources);
+    GameScene scene(game.Renderer(), resources,
+                        game.Graphics(), game.AudioOutput(), game.Inputs());
     {
         // A fresh cache must expose the missing sprite during startup.
         EXPECT_THROW(scene.Initialize(), SDL_Exception);
@@ -690,11 +699,12 @@ TEST_F(GameLifetime, SameSceneRestartsWithPendingEffectsAndResetsSessionState)
         scene.QueueAdd(std::make_unique<ParticleSystem>("blood.png", 1.f, 0.f, 0.f, 2));
         scene.RequestDestroy(activeProjectile);
         SDL_Event key{};
+        key.type = SDL_KEYDOWN;
         for (auto code : {SDL_SCANCODE_D, SDL_SCANCODE_SPACE, SDL_SCANCODE_LSHIFT,
                           SDL_SCANCODE_RIGHT, SDL_SCANCODE_E})
         {
             key.key.keysym.scancode = code;
-            Input::Get().UpdateInputsDown(key);
+            SdlInputAdapter(game.Inputs()).ProcessEvent(key, false);
         }
         Time::deltaTime = 99.0;
         scene.CleanUp();
@@ -711,12 +721,12 @@ TEST_F(GameLifetime, SameSceneRestartsWithPendingEffectsAndResetsSessionState)
         EXPECT_DOUBLE_EQ(Time::deltaTime, 0.0);
         Time::UpdateFrameTime();
         EXPECT_DOUBLE_EQ(Time::deltaTime, 0.0);
-        EXPECT_FLOAT_EQ(Input::Get().Horizontal(), 0.f);
-        EXPECT_FLOAT_EQ(Input::Get().CameraHorizontal(), 0.f);
-        EXPECT_FALSE(Input::Get().Jump());
-        EXPECT_FALSE(Input::Get().UseAction());
-        EXPECT_FALSE(Input::Get().CameraControll());
-        EXPECT_EQ(Input::Get().ChangeWeapon(), 0);
+        EXPECT_FLOAT_EQ(game.Inputs().Horizontal(), 0.f);
+        EXPECT_FLOAT_EQ(game.Inputs().CameraHorizontal(), 0.f);
+        EXPECT_FALSE(game.Inputs().Jump());
+        EXPECT_FALSE(game.Inputs().UseAction());
+        EXPECT_FALSE(game.Inputs().CameraControll());
+        EXPECT_EQ(game.Inputs().ChangeWeapon(), 0);
         EXPECT_EQ(GameTestAccess::ActiveWorm(game), firstWorm);
         for (const auto& object : game.Objects())
         {
@@ -823,7 +833,7 @@ TEST_F(GameLifetime, GameplayConstructorsDoNotAllocateEntitiesBodiesOrSubscripti
     HealthBar bar(camera->GetId(), *camera, 100, nullptr);
     FocusPoint focus;
     Weapon localWeapon(*camera);
-    WeaponManager weapons(game.Assets(), localWeapon);
+    WeaponManager weapons(game.Assets(), localWeapon, game.Inputs());
     WormManager worms(game.Context(), *camera, localWeapon);
     WormTeam emptyTeam(nullptr);
     const auto cameraX = camera->X();
@@ -880,7 +890,8 @@ TEST_F(GameLifetime, PhysicsObjectsRejectForeignWorldBeforeAllocatingResources)
     CreateTestTeam();
     b2World foreignPhysics({0, 0});
     const SceneContext foreign{game.Renderer(), game.Registry(),          foreignPhysics,
-                               game.Scene(),    game.Context().colliders, game.Context().contacts, game.Context().resources};
+                               game.Scene(),    game.Context().colliders, game.Context().contacts,
+                               game.Context().resources, game.Graphics(), game.AudioOutput(), game.Inputs()};
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     Worm worm(*camera, team->GetHealthBarTexture(), {3.f, 4.f});
     Projectile projectile(0, 2, 0, 0);
@@ -914,7 +925,8 @@ TEST_F(GameLifetime, PhysicsWorldValidationPrecedesEntityAllocation)
     b2World foreignPhysics({0, 0});
     const SceneContext foreign{game.Renderer(),          *exhausted,
                                foreignPhysics,           game.Scene(),
-                               game.Context().colliders, game.Context().contacts, game.Context().resources};
+                               game.Context().colliders, game.Context().contacts,
+                               game.Context().resources, game.Graphics(), game.AudioOutput(), game.Inputs()};
     Worm worm(*camera, nullptr, {0.f, 2.f});
     Projectile projectile(0, 2, 0, 0);
     Map map;
@@ -930,7 +942,7 @@ TEST_F(GameLifetime, PhysicsObjectsRejectMismatchedContactManagerBeforeInitializ
 {
     ContactManager foreignContacts;
     const SceneContext foreign{game.Renderer(), game.Registry(),          game.Physics(),
-                               game.Scene(),    game.Context().colliders, foreignContacts, game.Context().resources};
+                               game.Scene(),    game.Context().colliders, foreignContacts, game.Context().resources, game.Graphics(), game.AudioOutput(), game.Inputs()};
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     Worm worm(*camera, nullptr, {0.f, 2.f});
     Projectile projectile(0, 2, 0, 0);
@@ -967,8 +979,8 @@ TEST_F(GameLifetime, TeamRejectsWormsBeforeInitializationAndAfterCleanupWithoutL
     };
     reject();
     EXPECT_EQ(destroyedWorms, 1);
-    ASSERT_NO_THROW(team->Initialise(game.Assets()));
-    EXPECT_THROW(team->Initialise(game.Assets()), std::logic_error);
+    ASSERT_NO_THROW(team->Initialise(game.Assets(), game.AudioOutput()));
+    EXPECT_THROW(team->Initialise(game.Assets(), game.AudioOutput()), std::logic_error);
     EXPECT_THROW(team->AddWorm(nullptr), std::invalid_argument);
     EXPECT_THROW(
         team->AddWorm(std::make_unique<Worm>(*camera, team->GetHealthBarTexture(), Position{0, 2})),
@@ -978,7 +990,7 @@ TEST_F(GameLifetime, TeamRejectsWormsBeforeInitializationAndAfterCleanupWithoutL
     team->CleanUp();
     reject();
     EXPECT_EQ(destroyedWorms, 3);
-    ASSERT_NO_THROW(team->Initialise(game.Assets()));
+    ASSERT_NO_THROW(team->Initialise(game.Assets(), game.AudioOutput()));
     AddTrackedWorm();
     EXPECT_EQ(team->Size(), 1);
     team->CleanUp();
@@ -1057,10 +1069,11 @@ TEST_F(GameLifetime, ObjectContextIsCopiedAndUnavailableOutsideItsLifetime)
 
 TEST_F(GameLifetime, SceneRejectsInitializedObjectsWithForeignCommands)
 {
-    GameScene foreign(game.Renderer(), game.Assets());
+    GameScene foreign(game.Renderer(), game.Assets(),
+                        game.Graphics(), game.AudioOutput(), game.Inputs());
     auto object = std::make_unique<GameObject>();
     object->Initialise(SceneContext{game.Renderer(), game.Registry(), game.Physics(), foreign,
-                                    game.Context().colliders, game.Context().contacts, game.Assets()});
+                                    game.Context().colliders, game.Context().contacts, game.Assets(), game.Graphics(), game.AudioOutput(), game.Inputs()});
     EXPECT_THROW(game.AddObject(std::move(object)), std::invalid_argument);
     EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
     EXPECT_EQ(game.PendingAddCount(), 0);
@@ -1072,7 +1085,7 @@ TEST_F(GameLifetime, SceneRejectsInitializedObjectsWithDifferentPhysicsAndCleans
     b2World foreignPhysics({0, 0});
     auto object = std::make_unique<GameObject>();
     object->Initialise(SceneContext{game.Renderer(), game.Registry(), foreignPhysics, game.Scene(),
-                                    game.Context().colliders, game.Context().contacts, game.Assets()});
+                                    game.Context().colliders, game.Context().contacts, game.Assets(), game.Graphics(), game.AudioOutput(), game.Inputs()});
     EXPECT_THROW(game.AddObject(std::move(object)), std::invalid_argument);
     EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
     EXPECT_EQ(game.PendingAddCount(), 0);
@@ -1088,7 +1101,8 @@ TEST_F(GameLifetime, SceneRejectsDifferentResourceManagerOnSameRendererAndCleans
     auto foreignContext = game.Context();
     const SceneContext context{foreignContext.renderer, foreignContext.world,
                                foreignContext.physics, foreignContext.objects,
-                               foreignContext.colliders, foreignContext.contacts, foreignResources};
+                               foreignContext.colliders, foreignContext.contacts, foreignResources,
+                               game.Graphics(), game.AudioOutput(), game.Inputs()};
     object->Initialise(context);
     EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities - 1);
     EXPECT_THROW(game.AddObject(std::move(object)), std::invalid_argument);
@@ -1222,7 +1236,8 @@ TEST_F(GameLifetime, QueueRejectsNullObjectsAndRemovalOfObjectsOutsideScene)
     EXPECT_THROW(game.QueueAdd(nullptr), std::invalid_argument);
     EXPECT_THROW(game.AddObject(nullptr), std::invalid_argument);
     EXPECT_THROW(game.RequestDestroy(foreign), std::invalid_argument);
-    GameScene inactive(game.Renderer(), game.Assets());
+    GameScene inactive(game.Renderer(), game.Assets(),
+                        game.Graphics(), game.AudioOutput(), game.Inputs());
     EXPECT_THROW(inactive.QueueAdd(std::make_unique<GameObject>()), std::logic_error);
     EXPECT_THROW(inactive.RequestDestroy(*camera), std::logic_error);
     EXPECT_EQ(game.Objects().size(), active);
@@ -1329,7 +1344,8 @@ TEST_F(GameLifetime, CleanupExceptionsDoNotStopSceneDestructionOrNextSceneStartu
     EXPECT_FALSE(GameTestAccess::TakePendingException(game));
     EXPECT_EQ(SDL_RenderClear(game.Renderer()), 0);
 
-    GameScene next(game.Renderer(), game.Assets());
+    GameScene next(game.Renderer(), game.Assets(),
+                        game.Graphics(), game.AudioOutput(), game.Inputs());
     ASSERT_NO_THROW(next.Initialize());
     EXPECT_EQ(GameTestAccess::Registry(next).GetAmountOfAvailableEntities(), initialEntities);
     EXPECT_EQ(GameTestAccess::Physics(next).GetBodyCount(), initialBodies);
@@ -1366,7 +1382,8 @@ TEST_F(GameLifetime, MissingWeaponPowerBarRollsBackWithoutDanglingManagerReferen
     GameTestAccess::ResetScene(game);
     SceneAssetsWithout assets("powerBar.png");
     ResourceManager resources(game.Renderer(), assets.Directory());
-    GameScene scene(game.Renderer(), resources);
+    GameScene scene(game.Renderer(), resources,
+                        game.Graphics(), game.AudioOutput(), game.Inputs());
     {
         ScopedWorkingDirectory directory(assets.Directory());
         try
@@ -1401,7 +1418,8 @@ TEST_F(GameLifetime, MissingMusicRollsBackFullyConstructedGameplayAndAllowsRetry
     GameTestAccess::ResetScene(game);
     SceneAssetsWithout assets("Rick_Roll.ogg");
     ResourceManager resources(game.Renderer(), assets.Directory());
-    GameScene scene(game.Renderer(), resources);
+    GameScene scene(game.Renderer(), resources,
+                        game.Graphics(), game.AudioOutput(), game.Inputs());
     {
         ScopedWorkingDirectory directory(assets.Directory());
         try
@@ -1869,7 +1887,7 @@ TEST_F(GameLifetime, WormsShareSpriteAndTeamRemovalPreservesCachedDeathSound)
     team->RemoveWorm(first);
     EXPECT_EQ(game.Registry().GetComponent<Sprite>(secondId).texture, sprite);
     EXPECT_EQ(SDL_QueryTexture(sprite, nullptr, nullptr, nullptr, nullptr), 0);
-    game.Assets().GetSound("scream.wav").Play(100);
+    game.AudioOutput().Play(game.Assets().GetSound("scream.wav"), 100);
     team->RemoveWorm(second);
     team->CleanUp();
     team.reset();
@@ -1905,7 +1923,7 @@ TEST_F(GameLifetime, WeaponManagerDestructionAndWeaponCleanupPreserveProjectileA
     EXPECT_EQ(WeaponTestAccess::PowerBar(localWeapon), powerBar);
     auto* grenade = game.Assets().GetTexture("grenade.png");
     {
-        WeaponManager localManager(game.Assets(), localWeapon);
+        WeaponManager localManager(game.Assets(), localWeapon, game.Inputs());
         localManager.Initialise();
         EXPECT_EQ(game.Registry().GetComponent<Sprite>(localWeapon.GetId()).texture, grenade);
     }
@@ -2436,4 +2454,63 @@ TEST_F(GameLifetime, SurfaceOwnershipMovesAndLocksAreReleasedAfterException)
     }() ), std::runtime_error);
     EXPECT_EQ(surface->locked, 0);
 }
+
+TEST_F(GameLifetime, InputInterruptionCancelsChargeEvenWhenFocusReturnsInTheSameFrame)
+{
+    weapon->SetParent(GameTestAccess::ActiveWorm(game));
+    WeaponTestAccess::SetCharge(*weapon);
+    const auto pending = game.PendingAddCount();
+    game.Inputs().SetEnabled(false);
+    game.Inputs().SetEnabled(true);
+    ASSERT_TRUE(game.Inputs().Interrupted());
+    weapon->Update();
+    EXPECT_FLOAT_EQ(WeaponTestAccess::Charge(*weapon), 0.f);
+    EXPECT_EQ(game.PendingAddCount(), pending);
 }
+
+TEST_F(GameLifetime, InputInterruptionCancelsChargeAfterSkippedUpdates)
+{
+    weapon->SetParent(GameTestAccess::ActiveWorm(game));
+    WeaponTestAccess::SetCharge(*weapon);
+    const auto pending = game.PendingAddCount();
+    game.Inputs().SetEnabled(false);
+    game.Inputs().SetEnabled(true);
+    for (int frame = 0; frame < 3; ++frame)
+        game.Inputs().BeginFrame();
+    ASSERT_FALSE(game.Inputs().Interrupted());
+    weapon->Update();
+    EXPECT_FLOAT_EQ(WeaponTestAccess::Charge(*weapon), 0.f);
+    EXPECT_EQ(game.PendingAddCount(), pending);
+    weapon->Update();
+    EXPECT_EQ(game.PendingAddCount(), pending);
+
+    ScopedDeltaTime delta(0.1);
+    game.Inputs().SetAction(InputAction::Fire, true);
+    weapon->Update();
+    EXPECT_GT(WeaponTestAccess::Charge(*weapon), 0.f);
+    game.Inputs().SetAction(InputAction::Fire, false);
+    weapon->Update();
+    EXPECT_EQ(game.PendingAddCount(), pending + 1);
+}
+
+TEST_F(GameLifetime, SceneRejectsObjectsUsingDifferentAdapters)
+{
+    Renderer2D otherRendering(game.Renderer());
+    Audio otherAudio;
+    Input otherInput;
+    for (int index = 0; index < 3; ++index)
+    {
+        auto context = game.Context();
+        const SceneContext foreign{
+            context.renderer, context.world, context.physics, context.objects,
+            context.colliders, context.contacts, context.resources,
+            index == 0 ? otherRendering : context.rendering,
+            index == 1 ? otherAudio : context.audio,
+            index == 2 ? otherInput : context.input};
+        auto object = std::make_unique<GameObject>();
+        object->Initialise(foreign);
+        EXPECT_THROW(game.AddObject(std::move(object)), std::invalid_argument);
+        EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
+    }
+}
+} // namespace

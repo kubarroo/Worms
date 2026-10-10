@@ -1,5 +1,7 @@
 #include "Game/Player/Worm.h"
 #include "Core/Input.h"
+#include "Core/Audio/Audio.h"
+#include "Core/Renderer2D.h"
 #include "Core/ResourceManager.h"
 #include "Core/ParticleSystem.h"
 #include "Core/Physics/ContactManager.h"
@@ -104,7 +106,7 @@ void Worm::Update(std::vector<Worm*>& wormsToDelete)
 
     if (abs(rb.body->GetLinearVelocity().x) < 2)
         rb.body->SetLinearVelocity(
-            {Input::Get().Horizontal() * WORM_SPEED, rb.body->GetLinearVelocity().y});
+            {Context().input.Horizontal() * WORM_SPEED, rb.body->GetLinearVelocity().y});
 
     Jump();
 }
@@ -116,7 +118,7 @@ void Worm::Jump()
         return;
     }
     auto& rb = world->GetComponent<RigidBody>(objectId);
-    if (!IsGrounded() || !Input::Get().Jump() || rb.body->GetLinearVelocity().y > 0.4)
+    if (!IsGrounded() || !Context().input.Jump() || rb.body->GetLinearVelocity().y > 0.4)
     {
         return;
     }
@@ -124,7 +126,7 @@ void Worm::Jump()
     grounded = false;
     rb.body->SetLinearVelocity(
         {rb.body->GetLinearVelocity().x * sqrtf(2.0), JUMP_FORCE * sqrtf(2.0)});
-    jumpSound->Play();
+    Context().audio.Play(*jumpSound);
 }
 
 void Worm::CleanUp()

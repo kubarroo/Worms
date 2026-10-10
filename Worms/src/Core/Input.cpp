@@ -1,100 +1,73 @@
-#include "Core/Input.h"
+#include "Input.h"
 
 void Input::Reset() noexcept
 {
-    horizontal = vertical = camera_horizontal = camera_vertical = 0.f;
-    change_worm = change_team = use_action = jump = cameraControl = false;
-    changeWeapon = 0;
+    buttons = {};
+    cameraControl = false;
+    interrupted = false;
 }
-
-void Input::UpdateInputsDown(const SDL_Event& ev)
+void Input::BeginFrame() noexcept
 {
-    switch (ev.key.keysym.scancode)
-    {
-    case SDL_SCANCODE_W:
-        vertical = 1.f;
-        cameraControl = false;
-        break;
-    case SDL_SCANCODE_S:
-        vertical = -1.f;
-        cameraControl = false;
-        break;
-    case SDL_SCANCODE_A:
-        horizontal = -1.f;
-        cameraControl = false;
-        break;
-    case SDL_SCANCODE_D:
-        horizontal = 1.f;
-        cameraControl = false;
-        break;
-    case SDL_SCANCODE_UP:
-        camera_vertical = 1.f;
-        cameraControl = true;
-        break;
-    case SDL_SCANCODE_DOWN:
-        camera_vertical = -1.f;
-        cameraControl = true;
-        break;
-    case SDL_SCANCODE_LEFT:
-        camera_horizontal = -1.f;
-        cameraControl = true;
-        break;
-    case SDL_SCANCODE_RIGHT:
-        camera_horizontal = 1.f;
-        cameraControl = true;
-        break;
-        // case SDL_SCANCODE_TAB: change_worm = true; break;
-        // case SDL_SCANCODE_T: change_team = true; break;
-    case SDL_SCANCODE_LSHIFT:
-        use_action = true;
-        break;
-    case SDL_SCANCODE_SPACE:
-        jump = true;
-        break;
-    case SDL_SCANCODE_E:
-        changeWeapon = 1;
-        break;
-    case SDL_SCANCODE_Q:
-        changeWeapon = -1;
-        break;
-    default:
-        break;
-    }
+    interrupted = false;
+    for (auto& button : buttons)
+        button.pressed = button.released = button.consumed = false;
 }
-
-void Input::UpdateInputsUp(const SDL_Event& ev)
+void Input::SetEnabled(bool value) noexcept
 {
-    switch (ev.key.keysym.scancode)
+    if (enabled != value)
     {
-    case SDL_SCANCODE_W:
-    case SDL_SCANCODE_S:
-        vertical = 0.f;
-        break;
-    case SDL_SCANCODE_A:
-    case SDL_SCANCODE_D:
-        horizontal = 0.f;
-        break;
-    case SDL_SCANCODE_UP:
-    case SDL_SCANCODE_DOWN:
-        Input::Get().camera_vertical = 0.f;
-        break;
-    case SDL_SCANCODE_LEFT:
-    case SDL_SCANCODE_RIGHT:
-        Input::Get().camera_horizontal = 0.f;
-        break;
-        // case SDL_SCANCODE_TAB: change_worm = false; break;
-        // case SDL_SCANCODE_T: change_team = false; break;
-    case SDL_SCANCODE_LSHIFT:
-        use_action = false;
-        break;
-    case SDL_SCANCODE_SPACE:
-        jump = false;
-        break;
-    case SDL_SCANCODE_Q:
-    case SDL_SCANCODE_E:
-        changeWeapon = 0;
-        break;
-    default:
-        break;
+        const bool wasInterrupted = interrupted;
+        buttons = {};
+        cameraControl = false;
+        if (!value)
+            ++interruptionCount;
+        interrupted = wasInterrupted || !value;
     }
+    enabled = value;
+}
+void Input::SetAction(InputAction action, bool down) noexcept
+{
+    const auto index = static_cast<std::size_t>(action);
+    if (index >= buttons.size() || (!enabled && down))
+        return;
+    auto& button = buttons[index];
+    if (button.held == down)
+        return;
+    button.held = down;
+    if (down)
+    {
+        button.pressed = true;
+        if (action <= InputAction::AimDown)
+            cameraControl = false;
+        else if (action <= InputAction::CameraDown)
+            cameraControl = true;
+    }
+    else
+        button.released = true;
+}
+bool Input::Held(InputAction action) const noexcept
+{
+    const auto index = static_cast<std::size_t>(action);
+    return index < buttons.size() && buttons[index].held;
+}
+bool Input::Pressed(InputAction action) const noexcept
+{
+    const auto index = static_cast<std::size_t>(action);
+    return index < buttons.size() && buttons[index].pressed;
+}
+bool Input::Released(InputAction action) const noexcept
+{
+    const auto index = static_cast<std::size_t>(action);
+    return index < buttons.size() && buttons[index].released;
+}
+bool Input::ConsumePress(InputAction action) noexcept
+{
+    const auto index = static_cast<std::size_t>(action);
+    if (index >= buttons.size())
+        return false;
+    auto& button = buttons[index];
+    if (!button.pressed || button.consumed)
+        return false;
+    button.consumed = true;
+    return true;
 }

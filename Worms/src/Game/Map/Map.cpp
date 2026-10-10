@@ -3,6 +3,7 @@
 #include "Core/Physics/ContactManager.h"
 #include "Core/Utils.h"
 #include "Core/ResourceManager.h"
+#include "Core/Renderer2D.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Components.h"
 #include "SDL2/SDL_surface.h"
@@ -32,7 +33,8 @@ void Map::Initialise(const SceneContext& context)
         world->AddComponent<RigidBody>(objectId);
         mapTexture.reset(SDL_CreateTextureFromSurface(renderer, physTex->surface.get()));
         SDL_CHECK(mapTexture.get());
-        SDL_CALL(SDL_QueryTexture(mapTexture.get(), nullptr, nullptr, &mapSize.x, &mapSize.y));
+        const auto size = context.rendering.TextureSize(mapTexture.get());
+        mapSize = {size.x, size.y};
         world->AddComponent<Sprite>(objectId, {mapTexture.get()});
         CreateNewColliders();
     }

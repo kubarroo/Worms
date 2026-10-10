@@ -101,7 +101,7 @@ void WormManager::CreateTeam(int size)
 
     try
     {
-        newTeam->Initialise(context.resources);
+        newTeam->Initialise(context.resources, context.audio);
         for (int i = 0; i < size; ++i)
         {
             const Position spawnPosition{
@@ -199,11 +199,11 @@ void WormManager::Update()
         return;
     if (!nextTeamAlreadySelected)
     {
-        if (Input::Get().ChangeWorm())
+        if (context.input.ChangeWorm())
         {
             ChangeActiveWorm();
         }
-        if (Input::Get().ChangeTeam())
+        if (context.input.ChangeTeam())
         {
             ChangeTeam();
         }

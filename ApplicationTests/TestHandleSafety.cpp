@@ -1,3 +1,6 @@
+#include "Core/Renderer2D.h"
+#include "Core/Audio/Audio.h"
+#include "Core/Input.h"
 #include "Core/Camera/Camera.h"
 #include "Core/GameObject.h"
 #include "Core/ResourceManager.h"
@@ -52,7 +55,11 @@ TEST(HandleSafety, EntityZeroIsValidAndCleanupCanBeRepeated)
     ContactManager contacts;
     ColliderFactory colliders(physics, contacts);
     ResourceManager resources(nullptr, ".");
-    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts, resources};
+    Renderer2D rendering(nullptr);
+    Audio audio;
+    Input input;
+    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts, resources,
+                               rendering, audio, input};
     world->RegisterComponent<Position>();
     GameObject object;
     EXPECT_FALSE(object.HasEntity());
@@ -79,7 +86,11 @@ TEST(HandleSafety, FocusPointCanHaveNoTargetOrTargetEntityZero)
     ContactManager contacts;
     ColliderFactory colliders(physics, contacts);
     ResourceManager resources(nullptr, ".");
-    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts, resources};
+    Renderer2D rendering(nullptr);
+    Audio audio;
+    Input input;
+    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts, resources,
+                               rendering, audio, input};
     world->RegisterComponent<Position>();
     const auto target = world->CreateEntity();
     world->AddComponent<Position>(target, {3, 4});
@@ -108,7 +119,11 @@ TEST(HandleSafety, CameraReadsItsPositionAfterComponentCompaction)
     ContactManager contacts;
     ColliderFactory colliders(physics, contacts);
     ResourceManager resources(nullptr, ".");
-    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts, resources};
+    Renderer2D rendering(nullptr);
+    Audio audio;
+    Input input;
+    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts, resources,
+                               rendering, audio, input};
     world->RegisterComponent<Position>();
     const auto other = world->CreateEntity();
     world->AddComponent<Position>(other, {9, 9});
@@ -194,7 +209,11 @@ TEST(HandleSafety, ObserversClearMissingPositionAndDoNotResumeAfterItIsAddedBack
     ContactManager contacts;
     ColliderFactory colliders(physics, contacts);
     ResourceManager resources(nullptr, ".");
-    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts, resources};
+    Renderer2D rendering(nullptr);
+    Audio audio;
+    Input input;
+    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts, resources,
+                               rendering, audio, input};
     world->RegisterComponent<Position>();
     world->RegisterComponent<Follow>();
     world->RegisterSystem<TargetSystem>(*world);
@@ -229,7 +248,11 @@ TEST(HandleSafety, FocusPointResolvesPositionAfterAnotherComponentIsCompacted)
     ContactManager contacts;
     ColliderFactory colliders(physics, contacts);
     ResourceManager resources(nullptr, ".");
-    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts, resources};
+    Renderer2D rendering(nullptr);
+    Audio audio;
+    Input input;
+    const SceneContext context{nullptr, *world, physics, commands, colliders, contacts, resources,
+                               rendering, audio, input};
     world->RegisterComponent<Position>();
     const auto other = world->CreateEntity();
     world->AddComponent<Position>(other, {9, 10});

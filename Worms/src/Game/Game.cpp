@@ -13,7 +13,8 @@ void Game::InitWindow(const std::string& title, const int width, const int heigh
     App::InitWindow(title, width, height);
     try
     {
-        scene = std::make_unique<GameScene>(renderer.get(), Resources());
+        scene = std::make_unique<GameScene>(renderer.get(), Resources(), Graphics(),
+                                            AudioOutput(), Inputs());
         scene->Initialize();
     }
     catch (...)

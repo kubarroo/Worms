@@ -1,5 +1,7 @@
 #include "Core/Camera/Camera.h"
 #include "Core/Input.h"
+#include "Core/Audio/Audio.h"
+#include "Core/Renderer2D.h"
 #include "Core/Time.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include <utility>
@@ -49,11 +51,11 @@ void Camera::Update()
     {
         return;
     }
-    if (Input::Get().CameraControll())
+    if (Context().input.CameraControll())
     {
-        ChangeX(Input::Get().CameraHorizontal() * static_cast<float>(Time::deltaTime) *
+        ChangeX(Context().input.CameraHorizontal() * static_cast<float>(Time::deltaTime) *
                 CAMERA_SPEED);
-        ChangeY(Input::Get().CameraVertical() * static_cast<float>(Time::deltaTime) * CAMERA_SPEED);
+        ChangeY(Context().input.CameraVertical() * static_cast<float>(Time::deltaTime) * CAMERA_SPEED);
         return;
     }
     auto targetPosition = focusPoint->GetPos();

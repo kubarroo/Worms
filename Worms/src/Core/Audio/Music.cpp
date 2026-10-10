@@ -11,11 +11,6 @@ Music::Music(const std::string& fileName)
     }
 }
 
-void Music::Play(unsigned int times)
-{
-    Mix_PlayMusic(music, times);
-}
-
 Music::~Music()
 {
     Mix_FreeMusic(music);

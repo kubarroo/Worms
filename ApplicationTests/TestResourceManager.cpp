@@ -30,6 +30,9 @@ class ResourceTestApp : public App
 {
 public:
     using App::Resources;
+    using App::Graphics;
+    using App::AudioOutput;
+    using App::Inputs;
     SDL_Renderer* Renderer() const { return renderer.get(); }
 };
 
@@ -126,7 +129,7 @@ TEST_F(ResourceCache, AssetRootDoesNotFollowWorkingDirectoryChanges)
     EXPECT_NE(cache.GetTexture("worms.png"), nullptr);
     EXPECT_NO_THROW(cache.GetSound("jump.wav"));
     EXPECT_NO_THROW(cache.GetMusic("Rick_Roll.ogg"));
-    GameScene scene(app.Renderer(), cache);
+    GameScene scene(app.Renderer(), cache, app.Graphics(), app.AudioOutput(), app.Inputs());
     ASSERT_NO_THROW(scene.Initialize());
     EXPECT_NO_THROW(scene.Render());
     scene.CleanUp();
@@ -138,7 +141,7 @@ TEST_F(ResourceCache, CacheSurvivesSceneCleanupAndRejectsAnotherRenderer)
     auto* texture = cache.GetTexture("worms.png");
     auto* sound = &cache.GetSound("jump.wav");
     auto* music = &cache.GetMusic("Rick_Roll.ogg");
-    GameScene scene(app.Renderer(), cache);
+    GameScene scene(app.Renderer(), cache, app.Graphics(), app.AudioOutput(), app.Inputs());
     ASSERT_NO_THROW(scene.Initialize());
     EXPECT_EQ(&scene.Context().resources, &cache);
     scene.CleanUp();
@@ -148,14 +151,14 @@ TEST_F(ResourceCache, CacheSurvivesSceneCleanupAndRejectsAnotherRenderer)
     ASSERT_NO_THROW(scene.Initialize());
     EXPECT_EQ(&scene.Context().resources, &cache);
     ResourceManager headless(nullptr, root);
-    EXPECT_THROW(GameScene(app.Renderer(), headless), std::invalid_argument);
+    EXPECT_THROW(GameScene(app.Renderer(), headless, app.Graphics(), app.AudioOutput(), app.Inputs()), std::invalid_argument);
     EXPECT_THROW(headless.GetTexture("worms.png"), std::logic_error);
 }
 
 TEST_F(ResourceCache, CleanupStopsCachedPlaybackBeforeClosingPlatform)
 {
-    app.Resources().GetSound("jump.wav").Play();
-    app.Resources().GetMusic("Rick_Roll.ogg").Play();
+    app.AudioOutput().Play(app.Resources().GetSound("jump.wav"));
+    app.AudioOutput().Play(app.Resources().GetMusic("Rick_Roll.ogg"));
     EXPECT_GT(Mix_Playing(-1), 0);
     EXPECT_EQ(Mix_PlayingMusic(), 1);
     EXPECT_NO_THROW(app.Clean());
@@ -163,4 +166,28 @@ TEST_F(ResourceCache, CleanupStopsCachedPlaybackBeforeClosingPlatform)
     EXPECT_EQ(SDL_WasInit(0), 0u);
     EXPECT_NO_THROW(app.Clean());
 }
+
+TEST_F(ResourceCache, AudioAdapterPlaysAndStopsBorrowedAssets)
+{
+    auto& audio = app.AudioOutput();
+    auto& sound = app.Resources().GetSound("jump.wav");
+    auto& music = app.Resources().GetMusic("Rick_Roll.ogg");
+    ASSERT_GE(audio.Play(sound, -1), 0);
+    ASSERT_NO_THROW(audio.Play(music, -1));
+    EXPECT_GT(Mix_Playing(-1), 0);
+    EXPECT_EQ(Mix_PlayingMusic(), 1);
+    audio.StopSounds();
+    EXPECT_EQ(Mix_Playing(-1), 0);
+    EXPECT_EQ(Mix_PlayingMusic(), 1);
+    audio.StopAll();
+    EXPECT_EQ(Mix_PlayingMusic(), 0);
+    EXPECT_THROW(audio.Play(sound, 0), std::invalid_argument);
+    EXPECT_THROW(audio.Play(music, -2), std::invalid_argument);
+    EXPECT_NO_THROW(audio.SetSoundVolume(0.5f));
+    EXPECT_NO_THROW(audio.SetMusicVolume(0.5f));
+    EXPECT_THROW(audio.SetSoundVolume(-0.1f), std::invalid_argument);
+    EXPECT_THROW(audio.SetMusicVolume(1.1f), std::invalid_argument);
+    audio.SetSoundVolume(1.f);
+    audio.SetMusicVolume(1.f);
 }
+} // namespace
