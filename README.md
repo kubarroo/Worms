@@ -16,14 +16,14 @@ developed for a university computer graphics course.
 ## Requirements
 
 - Windows
-- CMake 3.24 or newer
+- CMake 3.28 or newer
 - Ninja
 - LLVM/Clang with C++20 support
 - Windows SDK and compatible C/C++ runtime development libraries
 - Git and Git LFS
 
 Dependencies are provided through Git submodules:
-SDL3, SDL3_image, SDL3_mixer, Dear ImGui, and Box2D 2.4.1.
+SDL3, SDL3_image, SDL3_mixer, Dear ImGui, Box2D 2.4.1, and EnTT 4.0.0.
 GoogleTest is also provided as a submodule and built when tests are enabled.
 
 Game assets and PDF documentation are stored using Git LFS.

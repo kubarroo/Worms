@@ -17,6 +17,7 @@ target_include_directories(worms_tests PRIVATE
     "${PROJECT_SOURCE_DIR}/Worms/src"
 )
 target_link_libraries(worms_tests PRIVATE
+    EnTT::EnTT
     GTest::gtest SDL3::SDL3 box2d worms_ecs worms_imgui
     $<IF:$<TARGET_EXISTS:SDL3_image::SDL3_image>,SDL3_image::SDL3_image,SDL3_image::SDL3_image-static>
     $<IF:$<TARGET_EXISTS:SDL3_mixer::SDL3_mixer>,SDL3_mixer::SDL3_mixer,SDL3_mixer::SDL3_mixer-static>

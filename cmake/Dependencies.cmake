@@ -37,6 +37,7 @@ add_subdirectory(third_party/SDL EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/SDL_image EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/SDL_mixer EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/box2d EXCLUDE_FROM_ALL)
+add_subdirectory(third_party/entt EXCLUDE_FROM_ALL)
 
 set(IMGUI_SOURCE_DIR "${PROJECT_SOURCE_DIR}/third_party/imgui")
 

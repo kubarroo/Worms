@@ -7,6 +7,7 @@ target_include_directories(worms PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 target_link_libraries(worms PRIVATE
+    EnTT::EnTT
     worms_ecs worms_imgui box2d SDL3::SDL3
     $<IF:$<TARGET_EXISTS:SDL3_image::SDL3_image>,SDL3_image::SDL3_image,SDL3_image::SDL3_image-static>
     $<IF:$<TARGET_EXISTS:SDL3_mixer::SDL3_mixer>,SDL3_mixer::SDL3_mixer,SDL3_mixer::SDL3_mixer-static>
