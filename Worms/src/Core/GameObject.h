@@ -34,6 +34,15 @@ public:
         return hasEntity;
     }
 
+    EntityHandle GetHandle() const
+    {
+        const auto id = GetId();
+        const auto handle = world->GetHandle(id);
+        if (!handle)
+            throw std::logic_error("GameObject entity is no longer alive");
+        return *handle;
+    }
+
     virtual ~GameObject() = default;
 
 protected:

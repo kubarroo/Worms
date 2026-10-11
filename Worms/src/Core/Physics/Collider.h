@@ -35,7 +35,7 @@ public:
     b2Body* GetBody();
 
 private:
-    EntityId id;
+    EntityHandle id;
     b2Body* body;
     ContactManager& contacts;
 

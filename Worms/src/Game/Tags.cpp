@@ -6,7 +6,9 @@ std::optional<EntityId> GetEntityWithTag(b2Contact* contact, PhysicsTag tag)
     for (auto* fixture : {contact->GetFixtureA(), contact->GetFixtureB()})
     {
         const auto* info = reinterpret_cast<const PhysicsInfo*>(fixture->GetUserData().pointer);
-        if (info && info->tag == tag) return info->id;
+        if (info && (!info->world || info->world == fixture->GetBody()->GetWorld()) &&
+            info->tag == tag && info->id != entt::null)
+            return info->id;
     }
     return {};
 }
@@ -17,7 +19,9 @@ std::optional<b2Body*> GetObjectWithTag(b2Contact* contact, PhysicsTag tag)
     for (auto* fixture : {contact->GetFixtureA(), contact->GetFixtureB()})
     {
         const auto* info = reinterpret_cast<const PhysicsInfo*>(fixture->GetUserData().pointer);
-        if (info && info->tag == tag) return fixture->GetBody();
+        if (info && (!info->world || info->world == fixture->GetBody()->GetWorld()) &&
+            info->tag == tag)
+            return fixture->GetBody();
     }
     return {};
 }

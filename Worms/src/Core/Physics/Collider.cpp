@@ -58,6 +58,6 @@ b2Body* Collider::GetBody()
 }
 
 Collider::Collider(b2Body* body, PhysicsInfo info, ContactManager& contacts)
-    : id(info.id), body(body), contacts(contacts)
+    : id{info.id, &contacts.Registry()}, body(body), contacts(contacts)
 {
 }

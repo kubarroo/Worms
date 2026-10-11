@@ -107,7 +107,7 @@ void GameScene::Initialize()
     {
         world = std::make_unique<World>(registry);
         physicsWorld = std::make_unique<b2World>(b2Vec2(0, -9.811f));
-        contacts = std::make_unique<ContactManager>();
+        contacts = std::make_unique<ContactManager>(registry);
         colliders = std::make_unique<ColliderFactory>(*physicsWorld, *contacts);
         context = std::make_unique<SceneContext>(renderer, *world, *physicsWorld, *this, *colliders,
                                                  *contacts, resources, rendering, audio, input);
@@ -137,7 +137,7 @@ void GameScene::Initialize()
 
         weaponManager->Initialise();
 
-        cameraPtr->ChangeTarget(wormManager->GetActiveWormId());
+        cameraPtr->ChangeTarget(wormManager->GetActiveWormHandle());
 
         music = &resources.GetMusic("Rick_Roll.ogg");
         audio.Play(*music);

@@ -18,6 +18,7 @@ public:
     void RemoveWorm(Worm* worm);
     void ChangeActiveWorm();
     EntityId GetActiveWorm();
+    EntityHandle GetActiveWormHandle();
     SDL_Texture* GetHealthBarTexture() const
     {
         return healthBarTexture.get();

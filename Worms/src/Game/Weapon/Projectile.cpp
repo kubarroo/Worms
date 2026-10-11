@@ -30,8 +30,7 @@ void Projectile::Update()
             "particle.png", params.explosionRadius * 3.f, pos.x, pos.y, 100));
 
         world->GetComponent<RigidBody>(objectId).body->SetAwake(true);
-        sensorInfo.id = objectId;
-		sensorInfo.tag = PhysicsTag::DESTRUCTION_FIELD;
+        sensorInfo = {PhysicsTag::DESTRUCTION_FIELD, objectId, &Context().physics};
 		b2CircleShape shape;
 		shape.m_radius = params.explosionRadius;
         fixture = Context().colliders.CreateTriggerFixture(collider->GetBody(), &shape, sensorInfo);
@@ -80,8 +79,7 @@ void Projectile::Initialise(const SceneContext& context)
         world->AddComponent<Sprite>(objectId, {texture});
         world->AddComponent<Rotation>(objectId, {0});
         auto& rigidBody = world->AddComponent<RigidBody>(objectId);
-        physicsInfo.id = objectId;
-        physicsInfo.tag = PhysicsTag::BULLET;
+        physicsInfo = {PhysicsTag::BULLET, objectId, &context.physics};
 
         b2CircleShape shape;
         shape.m_radius = 0.1f;
@@ -99,9 +97,9 @@ void Projectile::Initialise(const SceneContext& context)
         rigidBody.body->GetFixtureList()->SetRestitution(params.bounciness);
         rigidBody.body->SetGravityScale(params.gravityScale);
         collisionSubscription = Context().contacts.AddEvent(
-            objectId, CollisionType::BEGIN,
+            GetHandle(), CollisionType::BEGIN,
             std::bind(&Projectile::onCollision, this, std::placeholders::_1));
-        if (camera) camera->ChangeTarget(objectId);
+        if (camera) camera->ChangeTarget(GetHandle());
     }
     catch (...)
     {

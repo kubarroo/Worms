@@ -27,11 +27,10 @@ void Worm::Initialise(const SceneContext& context)
         jumpSound = &context.resources.GetSound("jump.wav");
         auto& pos = world->AddComponent<Position>(objectId, Position{spawnPosition.x, spawnPosition.y});
 
-        physicsInfo.tag = PhysicsTag::WORM;
-        physicsInfo.id = objectId;
+        physicsInfo = {PhysicsTag::WORM, objectId, &context.physics};
 
         damageSubscription = Context().contacts.AddEvent(
-            objectId, CollisionType::BEGIN,
+            GetHandle(), CollisionType::BEGIN,
             [&](b2Contact* contact)
             {
                 auto entId = GetEntityWithTag(contact, PhysicsTag::DESTRUCTION_FIELD);
@@ -41,8 +40,7 @@ void Worm::Initialise(const SceneContext& context)
 
         groundedId = world->CreateEntity();
         hasGroundedEntity = true;
-        groundedPhysicsInfo.tag = PhysicsTag::GROUNDED;
-        groundedPhysicsInfo.id = groundedId;
+        groundedPhysicsInfo = {PhysicsTag::GROUNDED, groundedId, &context.physics};
 
         world->AddComponent<RenderOrder>(objectId,
             NextRenderOrder(context.registry, RenderLayer::Actors));
@@ -68,11 +66,11 @@ void Worm::Initialise(const SceneContext& context)
         Context().colliders.CreateTriggerFixture(collider->GetBody(), &groundShape,
                                                  groundedPhysicsInfo);
         groundedBeginSubscription = Context().contacts.AddEvent(
-            groundedId, CollisionType::BEGIN, [&](b2Contact*) { grounded = true; });
+            *world->GetHandle(groundedId), CollisionType::BEGIN, [&](b2Contact*) { grounded = true; });
         groundedEndSubscription = Context().contacts.AddEvent(
-            groundedId, CollisionType::END, [&](b2Contact*) { grounded = false; });
+            *world->GetHandle(groundedId), CollisionType::END, [&](b2Contact*) { grounded = false; });
 
-        healthBar = std::make_unique<HealthBar>(objectId, camera, 100, healthTexture);
+        healthBar = std::make_unique<HealthBar>(GetHandle(), camera, 100, healthTexture);
         healthBar->Initialise(context);
         world->AddComponent<RigidBody>(objectId, {collider->GetBody()});
     }

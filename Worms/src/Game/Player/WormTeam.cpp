@@ -92,12 +92,17 @@ void WormTeam::ChangeActiveWorm()
 
 EntityId WormTeam::GetActiveWorm()
 {
+    return GetActiveWormHandle().id;
+}
+
+EntityHandle WormTeam::GetActiveWormHandle()
+{
     if (worms.empty())
     {
         throw std::logic_error("Cannot get active worm from an empty team");
     }
     ActiveWormCheck();
-    return worms[activeWorm]->GetId();
+    return worms[activeWorm]->GetHandle();
 }
 
 int WormTeam::Size() const

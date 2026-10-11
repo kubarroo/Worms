@@ -1,4 +1,5 @@
 #include "Core/GameObject.h"
+#include "Core/Physics/ContactManager.h"
 
 const SceneContext& GameObject::Context() const
 {
@@ -15,6 +16,8 @@ void GameObject::Initialise(const SceneContext& newContext)
     }
     if (&newContext.registry != &newContext.world.Registry())
         throw std::invalid_argument("Context uses different ECS registries");
+    if (&newContext.contacts.Registry() != &newContext.registry)
+        throw std::invalid_argument("Contact manager uses a different ECS registry");
     const auto newId = newContext.world.CreateEntity();
     context.emplace(newContext);
     renderer = newContext.renderer;

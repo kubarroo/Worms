@@ -18,6 +18,10 @@ void ContactManager::HandleContact(b2Contact* contact, CollisionType type) noexc
 {
     try
     {
+        if (physicsWorld &&
+            (contact->GetFixtureA()->GetBody()->GetWorld() != physicsWorld ||
+             contact->GetFixtureB()->GetBody()->GetWorld() != physicsWorld))
+            return;
         const auto first = Pending(contact->GetFixtureA(), type);
         const auto second = Pending(contact->GetFixtureB(), type);
         Dispatch(first, contact);
@@ -33,6 +37,7 @@ CollisionEvent ContactManager::Pending(b2Fixture* fixture, CollisionType type)
 {
     if (!fixture->GetUserData().pointer) return {};
     const auto* info = reinterpret_cast<const PhysicsInfo*>(fixture->GetUserData().pointer);
+    if (info->world && info->world != fixture->GetBody()->GetWorld()) return {};
     auto& events = GetEvents(type);
     auto found = events.find(info->id);
     if (found == events.end()) return {};
@@ -70,11 +75,15 @@ void ContactManager::RethrowPendingException()
     if (auto error = TakePendingException()) std::rethrow_exception(error);
 }
 
-SubscriptionId ContactManager::AddEvent(EntityId entity, CollisionType type,
+SubscriptionId ContactManager::AddEvent(EntityHandle handle, CollisionType type,
                                         CollisionCallback callback)
 {
+    if (handle.owner != &registry || !registry.valid(handle.id))
+        throw std::invalid_argument("Collision subscription requires a live entity in its registry");
+    const auto entity = handle.id;
     auto& events = GetEvents(type);
     if (!callback) throw std::invalid_argument("Collision callback is empty");
+    if (entity == entt::null) throw std::invalid_argument("Collision entity is null");
     if (!nextSubscription) throw std::overflow_error("Collision subscription IDs exhausted");
     const auto id = nextSubscription++;
     subscriptions.emplace(id, std::make_shared<Subscription>(
@@ -108,8 +117,11 @@ bool ContactManager::RemoveEvent(SubscriptionId id)
     return true;
 }
 
-void ContactManager::ClearEvent(EntityId entity, CollisionType type)
+void ContactManager::ClearEvent(EntityHandle handle, CollisionType type)
 {
+    if (handle.owner != &registry || handle.id == entt::null)
+        throw std::invalid_argument("Collision entity belongs to another registry or is null");
+    const auto entity = handle.id;
     auto& events = GetEvents(type);
     auto found = events.find(entity);
     if (found == events.end()) return;

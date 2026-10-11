@@ -14,6 +14,7 @@ public:
     ColliderFactory(b2World& physicsWorld, ContactManager& contacts)
         : physicsWorld(physicsWorld), contacts(contacts)
     {
+        contacts.BindPhysicsWorld(physicsWorld);
     }
     void RequireServices(const b2World& expectedWorld, const ContactManager& expectedContacts) const
     {
@@ -39,6 +40,12 @@ public:
     }
 
 private:
+    void BindMetadata(PhysicsInfo& info) const
+    {
+        if (info.world && info.world != &physicsWorld)
+            throw std::invalid_argument("Collider metadata belongs to another physics world");
+        info.world = &physicsWorld;
+    }
     b2World& physicsWorld;
     ContactManager& contacts;
 };

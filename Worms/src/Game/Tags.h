@@ -4,6 +4,8 @@
 #include <optional>
 #include <string>
 
+class b2World;
+
 
 enum PhysicsTag
 {
@@ -19,6 +21,7 @@ struct PhysicsInfo
 {
     PhysicsTag tag;
     EntityId id = entt::null;
+    const b2World* world = nullptr;
 };
 
 struct Parameters

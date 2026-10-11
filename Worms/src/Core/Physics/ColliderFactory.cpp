@@ -4,6 +4,7 @@
 Collider ColliderFactory::CreateTriggerBody(b2Shape* shape, b2Vec2 position,
                                             PhysicsInfo& info)
 {
+    BindMetadata(info);
     b2BodyDef bodyDef;
     bodyDef.position = position;
     bodyDef.type = b2_kinematicBody;
@@ -17,6 +18,7 @@ Collider ColliderFactory::CreateTriggerBody(b2Shape* shape, b2Vec2 position,
 Collider ColliderFactory::CreateDynamicBody(b2Shape* shape, b2Vec2 position,
                                             PhysicsInfo& info, uintptr_t userData)
 {
+    BindMetadata(info);
     b2BodyDef bodyDef;
     bodyDef.position = position;
     bodyDef.type = b2_dynamicBody;
@@ -31,6 +33,7 @@ Collider ColliderFactory::CreateDynamicBody(b2Shape* shape, b2Vec2 position,
 Collider ColliderFactory::CreateKineticBody(b2Shape* shape, b2Vec2 position,
                                             PhysicsInfo& info)
 {
+    BindMetadata(info);
     b2BodyDef bodyDef;
     bodyDef.position = position;
     bodyDef.type = b2_kinematicBody;
@@ -43,6 +46,7 @@ Collider ColliderFactory::CreateKineticBody(b2Shape* shape, b2Vec2 position,
 
 Collider ColliderFactory::CreateStaticBody(b2Shape* shape, b2Vec2 position, PhysicsInfo& info)
 {
+    BindMetadata(info);
     b2BodyDef bodyDef;
     bodyDef.type = b2_staticBody;
     bodyDef.fixedRotation = true;
@@ -58,6 +62,7 @@ b2Fixture* ColliderFactory::CreateTriggerFixture(b2Body* body, b2Shape* shape,
 {
     if (!body || body->GetWorld() != &physicsWorld)
         throw std::invalid_argument("Fixture body belongs to another physics world");
+    BindMetadata(info);
     b2FixtureDef fixtureDef;
     fixtureDef.isSensor = true;
     fixtureDef.shape = shape;
@@ -72,6 +77,7 @@ b2Fixture* ColliderFactory::CreateDynamicFixture(b2Body* body, b2Shape* shape,
 {
     if (!body || body->GetWorld() != &physicsWorld)
         throw std::invalid_argument("Fixture body belongs to another physics world");
+    BindMetadata(info);
     b2FixtureDef fixtureDef;
     fixtureDef.shape = shape;
     fixtureDef.friction = 1;
@@ -85,6 +91,7 @@ b2Fixture* ColliderFactory::CreateKineticFixture(b2Body* body, b2Shape* shape,
 {
     if (!body || body->GetWorld() != &physicsWorld)
         throw std::invalid_argument("Fixture body belongs to another physics world");
+    BindMetadata(info);
     b2FixtureDef fixtureDef;
     fixtureDef.shape = shape;
     fixtureDef.friction = 1;
@@ -98,6 +105,7 @@ b2Fixture* ColliderFactory::CreateStaticFixture(b2Body* body, b2Shape* shape,
 {
     if (!body || body->GetWorld() != &physicsWorld)
         throw std::invalid_argument("Fixture body belongs to another physics world");
+    BindMetadata(info);
     b2FixtureDef fixtureDef;
     fixtureDef.shape = shape;
     fixtureDef.userData.pointer = reinterpret_cast<uintptr_t>(&info);

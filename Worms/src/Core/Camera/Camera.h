@@ -41,13 +41,13 @@ public:
     {
         zoom += delta;
     }
-    void ChangeTarget(EntityId newTargetId)
+    void ChangeTarget(EntityHandle newTarget)
     {
         if (!focusPoint)
         {
             throw std::logic_error("Camera has no focus point");
         }
-        focusPoint->ChangeTarget(newTargetId);
+        focusPoint->ChangeTarget(newTarget);
         targetLostPending = targetLossReported = false;
     }
     void ClearTarget()

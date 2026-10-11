@@ -14,9 +14,16 @@ public:
         ClearTarget();
         GameObject::CleanUp();
     }
-    void ChangeTarget(EntityId newTargetId)
+    void ChangeTarget(EntityHandle newTarget)
     {
-        target = HasEntity() ? world->GetHandle(newTargetId) : std::nullopt;
+        if (!HasEntity())
+        {
+            ClearTarget();
+            return;
+        }
+        if (newTarget.owner != &Context().registry)
+            throw std::invalid_argument("Camera target belongs to another registry");
+        target = world->IsAlive(newTarget) ? std::optional{newTarget} : std::nullopt;
     }
     void ClearTarget()
     {

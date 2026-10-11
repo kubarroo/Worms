@@ -4,13 +4,15 @@
 #include "Core/Renderer2D.h"
 #include <algorithm>
 
-HealthBar::HealthBar(EntityId parentId, const Camera& camera, int health, SDL_Texture* texture)
-    : parentId(parentId), initialHealth(health), texture(texture), camera(camera)
+HealthBar::HealthBar(EntityHandle parent, const Camera& camera, int health, SDL_Texture* texture)
+    : parent(parent), initialHealth(health), texture(texture), camera(camera)
 {
 }
 
 void HealthBar::Initialise(const SceneContext& context)
 {
+    if (!context.world.IsAlive(parent))
+        throw std::invalid_argument("Health bar requires a live parent in its registry");
     GameObject::Initialise(context);
     try
     {
@@ -18,7 +20,7 @@ void HealthBar::Initialise(const SceneContext& context)
 
         world->AddComponent<Position>(objectId, {0, 0});
         world->AddComponent<Health>(objectId, {initialHealth, initialHealth});
-        world->AddComponent<Follow>(objectId, {world->GetHandle(parentId), 0.0, 0.3});
+        world->AddComponent<Follow>(objectId, {parent, 0.0, 0.3});
         healthBar = texture;
         SDL_CHECK(healthBar);
     }

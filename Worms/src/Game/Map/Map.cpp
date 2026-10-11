@@ -22,14 +22,13 @@ void Map::Initialise(const SceneContext& context)
     physicsWorld = &context.physics;
     try
     {
-        physicsInfo.id = objectId;
-        physicsInfo.tag = PhysicsTag::MAP;
+        physicsInfo = {PhysicsTag::MAP, objectId, &context.physics};
         world->AddComponent<Position>(objectId, {1.5f, -2.f});
         const auto mapPath = (context.resources.AssetRoot() / "map.png").string();
         physTex = IMG_LoadPhysicTexture(renderer, mapPath.c_str());
         SDL_CHECK((physTex ? physTex->surface.get() : nullptr));
         destructionSubscription =
-            Context().contacts.AddEvent(objectId, CollisionType::BEGIN,
+            Context().contacts.AddEvent(GetHandle(), CollisionType::BEGIN,
                                         std::bind(&Map::DestroyMap, this, std::placeholders::_1));
         world->AddComponent<RigidBody>(objectId);
         mapTexture.reset(SDL_CreateTextureFromSurface(renderer, physTex->surface.get()));

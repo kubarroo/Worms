@@ -23,10 +23,13 @@ public:
     {
         canShoot = true;
     }
-    void SetParent(EntityId newParent)
+    void SetParent(EntityHandle newParent)
     {
-        const auto newHandle = HasEntity() ? world->GetHandle(newParent) : std::nullopt;
-        if (parentId == newHandle) return;
+        if (HasEntity() && newParent.owner != &Context().registry)
+            throw std::invalid_argument("Weapon parent belongs to another registry");
+        const auto newHandle = HasEntity() && world->IsAlive(newParent)
+                                   ? std::optional{newParent} : std::nullopt;
+        if (newHandle && parentId == newHandle) return;
         ClearParent();
         parentId = newHandle;
     }

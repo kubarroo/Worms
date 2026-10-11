@@ -41,6 +41,8 @@ static_assert(!std::is_move_constructible_v<App>);
 static_assert(noexcept(std::declval<GameScene&>().CleanUp()));
 static_assert(noexcept(std::declval<App&>().Clean()));
 static_assert(noexcept(std::declval<Game&>().Clean()));
+static_assert(!std::is_invocable_v<decltype(&Weapon::SetParent), Weapon&, EntityId>);
+static_assert(!std::is_constructible_v<HealthBar, EntityId, const Camera&, int, SDL_Texture*>);
 
 struct GameTestAccess
 {
@@ -541,7 +543,7 @@ TEST_F(GameLifetime, SecondSceneOwnsIndependentPhysicsServicesAndCleanup)
         const auto firstId = GameTestAccess::ActiveWorm(game);
         const auto secondId = GameTestAccess::Registry(second).TryGetComponent<Position>(firstId);
         ASSERT_TRUE(secondId);
-        const auto extra = second.Context().contacts.AddEvent(firstId, BEGIN, [](b2Contact*) {});
+        const auto extra = second.Context().contacts.AddEvent(*GameTestAccess::Registry(second).GetHandle(firstId), BEGIN, [](b2Contact*) {});
         EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
         EXPECT_EQ(GameTestAccess::SubscriptionCount(second), subscriptions + 1);
         EXPECT_TRUE(second.Context().contacts.RemoveEvent(extra));
@@ -586,7 +588,7 @@ TEST_F(GameLifetime, FailedSecondSceneStartupDoesNotInvalidateRunningPhysicsServ
 TEST_F(GameLifetime, CameraTargetLossIsDelayedConsumableAndResetByTracking)
 {
     const auto id = GameTestAccess::ActiveWorm(game);
-    camera->ChangeTarget(id);
+    camera->ChangeTarget(*game.Registry().GetHandle(id));
     camera->Update();
     camera->ClearTarget();
     camera->Update();
@@ -597,7 +599,7 @@ TEST_F(GameLifetime, CameraTargetLossIsDelayedConsumableAndResetByTracking)
     EXPECT_FALSE(camera->ConsumeTargetLost());
     camera->Update();
     EXPECT_FALSE(camera->ConsumeTargetLost());
-    camera->ChangeTarget(id);
+    camera->ChangeTarget(*game.Registry().GetHandle(id));
     camera->Update();
     EXPECT_FALSE(camera->ConsumeTargetLost());
     camera->ClearTarget();
@@ -611,7 +613,7 @@ TEST_F(GameLifetime, SceneConsumesCameraTargetLossAndChangesTeamExactlyOnce)
 {
     ScopedDeltaTime delta(0);
     const auto first = GameTestAccess::ActiveWorm(game);
-    camera->ChangeTarget(first);
+    camera->ChangeTarget(*game.Registry().GetHandle(first));
     camera->Update();
     camera->ClearTarget();
     SDL_Delay(1600);
@@ -875,7 +877,7 @@ TEST_F(GameLifetime, GameplayConstructorsDoNotAllocateEntitiesBodiesOrSubscripti
     SceneAssetsWithout assets("worms.png");
     ScopedWorkingDirectory directory(assets.Directory());
     Worm worm(*camera, nullptr, {-1.f, 2.f});
-    HealthBar bar(camera->GetId(), *camera, 100, nullptr);
+    HealthBar bar(camera->GetHandle(), *camera, 100, nullptr);
     FocusPoint focus;
     Weapon localWeapon(*camera);
     WeaponManager weapons(game.Assets(), localWeapon, game.Inputs());
@@ -983,7 +985,7 @@ TEST_F(GameLifetime, PhysicsWorldValidationPrecedesEntityAllocation)
 
 TEST_F(GameLifetime, PhysicsObjectsRejectMismatchedContactManagerBeforeInitialization)
 {
-    ContactManager foreignContacts;
+    ContactManager foreignContacts(game.Context().registry);
     const SceneContext foreign{game.Renderer(), game.Registry(),          game.Physics(),
                                game.Scene(),    game.Context().colliders, foreignContacts, game.Context().resources, game.Graphics(), game.AudioOutput(), game.Inputs()};
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
@@ -1042,23 +1044,21 @@ TEST_F(GameLifetime, TeamRejectsWormsBeforeInitializationAndAfterCleanupWithoutL
 
 TEST_F(GameLifetime, FailedTeamCreationDoesNotConsumeSpawnPositions)
 {
-    entt::registry localRegistry;
-    auto incomplete = std::make_unique<World>(localRegistry);
-    ScopedComponentFailure<Follow> failure(localRegistry);
-    WormManager local(game.ContextWith(*incomplete), *camera, *weapon);
+    ScopedComponentFailure<Follow> failure(game.Context().registry);
+    WormManager local(game.Context(), *camera, *weapon);
     local.Initialise();
     EXPECT_THROW(local.CreateTeam(2), std::exception);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
     failure.Stop();
     ASSERT_NO_THROW(local.CreateTeam(2));
-    EXPECT_FLOAT_EQ(incomplete->GetComponent<Position>(local.GetActiveWormId()).x, -1.f);
+    EXPECT_FLOAT_EQ(game.Registry().GetComponent<Position>(local.GetActiveWormId()).x, -1.f);
     EXPECT_FLOAT_EQ(game.Physics().GetBodyList()->GetPosition().x, 0.f);
     local.CreateTeam(1);
     EXPECT_FLOAT_EQ(game.Physics().GetBodyList()->GetPosition().x, 1.f);
     local.CleanUp();
     local.Initialise();
     local.CreateTeam(1);
-    EXPECT_FLOAT_EQ(incomplete->GetComponent<Position>(local.GetActiveWormId()).x, -1.f);
+    EXPECT_FLOAT_EQ(game.Registry().GetComponent<Position>(local.GetActiveWormId()).x, -1.f);
     local.CleanUp();
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
 }
@@ -1079,14 +1079,13 @@ TEST_F(GameLifetime, RestartedGameRestoresInitialWormSpawnPosition)
 TEST_F(GameLifetime, HealthBarInitializationFailurePreservesConfigurationForRetry)
 {
     CreateTestTeam();
-    entt::registry localRegistry;
-    auto incomplete = std::make_unique<World>(localRegistry);
-    ScopedComponentFailure<Follow> failure(localRegistry);
-    HealthBar bar(camera->GetId(), *camera, 75, team->GetHealthBarTexture());
-    const auto available = incomplete->GetEntityCount();
-    EXPECT_THROW(bar.Initialise(game.ContextWith(*incomplete)), std::exception);
+    ScopedComponentFailure<Follow> failure(game.Context().registry);
+    HealthBar bar(camera->GetHandle(), *camera, 75, team->GetHealthBarTexture());
+    const auto entities = game.Registry().GetEntityCount();
+    EXPECT_THROW(bar.Initialise(game.Context()), std::exception);
     EXPECT_FALSE(bar.HasEntity());
-    EXPECT_EQ(incomplete->GetEntityCount(), available);
+    EXPECT_EQ(game.Registry().GetEntityCount(), entities);
+    failure.Stop();
     ASSERT_NO_THROW(bar.Initialise(game.Context()));
     EXPECT_EQ(bar.getCurrentHp(), 75);
     EXPECT_THROW(bar.Initialise(game.Context()), std::logic_error);
@@ -1686,7 +1685,7 @@ TEST_F(GameLifetime, ProjectileCanUnsubscribeDuringCollisionWithoutRemovingOther
     fixture.isSensor = true;
     obstacle->CreateFixture(&fixture);
     int calls = 0;
-    auto observer = game.Context().contacts.AddEvent(id, BEGIN, [&](b2Contact*) { ++calls; });
+    auto observer = game.Context().contacts.AddEvent(*game.Registry().GetHandle(id), BEGIN, [&](b2Contact*) { ++calls; });
     game.Physics().Step(1.f / 60, 8, 3);
     ASSERT_NE(body->GetContactList(), nullptr);
     const int previousCalls = calls;
@@ -1716,7 +1715,7 @@ TEST_F(GameLifetime, CollisionExceptionIsReportedAfterStepAndDoesNotInterruptRep
     auto* moving = game.Physics().CreateBody(&definition);
     moving->CreateFixture(&shape, 1);
     int calls = 0;
-    game.Context().contacts.AddEvent(info.id, BEGIN,
+    game.Context().contacts.AddEvent(*game.Registry().GetHandle(info.id), BEGIN,
                                      [&](b2Contact*)
                                      {
                                          ++calls;
@@ -1880,7 +1879,7 @@ TEST_F(GameLifetime, CleanedHealthBarDoesNotReleaseBorrowedTexture)
     Sdl::TexturePtr texture(SDL_CreateTexture(game.Renderer(), SDL_PIXELFORMAT_RGBA8888,
                                             SDL_TEXTUREACCESS_STATIC, 40, 10));
     ASSERT_TRUE(texture);
-    HealthBar bar(camera->GetId(), *camera, 100, texture.get());
+    HealthBar bar(camera->GetHandle(), *camera, 100, texture.get());
     bar.Initialise(game.Context());
     bar.CleanUp();
     EXPECT_FALSE(bar.HasEntity());
@@ -2403,7 +2402,7 @@ TEST_F(GameLifetime, MapReacquiresComponentsAfterBodyDestructionCallbacksCompact
     fixtureDef.isSensor = true;
     sensor->CreateFixture(&fixtureDef);
     int callbacks = 0;
-    const auto subscription = game.Context().contacts.AddEvent(map.GetId(), CollisionType::END,
+    const auto subscription = game.Context().contacts.AddEvent(map.GetHandle(), CollisionType::END,
                                                                [&](b2Contact*)
                                                                {
                                                                    ++callbacks;
@@ -2432,9 +2431,9 @@ TEST_F(GameLifetime, ObserversRejectAReusedTargetBeforeTheirNextUpdate)
     world.AddComponent<Follow>(follower, {world.GetHandle(target), 0, 0});
     FocusPoint focus;
     focus.Initialise(game.ContextWith(world));
-    focus.ChangeTarget(target);
-    camera->ChangeTarget(target);
-    weapon->SetParent(target);
+    focus.ChangeTarget(*world.GetHandle(target));
+    camera->ChangeTarget(*game.Registry().GetHandle(target));
+    weapon->SetParent(*world.GetHandle(target));
     WeaponTestAccess::SetCharge(*weapon);
     const auto pending = game.PendingAddCount();
     world.DestroyEntity(target);
@@ -2466,13 +2465,135 @@ TEST_F(GameLifetime, SettingTheSameWeaponParentPreservesChargeButChangingItReset
     const auto second = world.CreateEntity();
     world.AddComponent<Position>(first, {1, 2});
     world.AddComponent<Position>(second, {3, 4});
-    weapon->SetParent(first);
+    weapon->SetParent(*world.GetHandle(first));
     WeaponTestAccess::SetCharge(*weapon);
-    weapon->SetParent(first);
+    weapon->SetParent(*world.GetHandle(first));
     EXPECT_FLOAT_EQ(WeaponTestAccess::Charge(*weapon), 0.5f);
-    weapon->SetParent(second);
+    weapon->SetParent(*world.GetHandle(second));
     EXPECT_FLOAT_EQ(WeaponTestAccess::Charge(*weapon), 0);
     EXPECT_TRUE(WeaponTestAccess::HasParent(*weapon));
+}
+
+TEST_F(GameLifetime, PublicRelationsRejectForeignHandlesWithIdenticalEntityIds)
+{
+    CreateTestTeam();
+    auto& world = game.Registry();
+    const auto target = world.CreateEntity();
+    world.AddComponent<Position>(target, {100, 2});
+    const auto local = *world.GetHandle(target);
+    entt::registry foreignRegistry;
+    World foreignWorld(foreignRegistry);
+    const auto foreignEntity = foreignRegistry.create(target);
+    ASSERT_EQ(foreignEntity, target);
+    foreignWorld.AddComponent<Position>(foreignEntity, {-100, 2});
+    const auto foreign = *foreignWorld.GetHandle(foreignEntity);
+
+    FocusPoint focus;
+    focus.Initialise(game.Context());
+    focus.ChangeTarget(local);
+    EXPECT_THROW(focus.ChangeTarget(foreign), std::invalid_argument);
+    ASSERT_TRUE(focus.GetPos());
+    EXPECT_FLOAT_EQ(focus.GetPos()->x, 100);
+
+    camera->ChangeTarget(local);
+    EXPECT_THROW(camera->ChangeTarget(foreign), std::invalid_argument);
+    const auto previousX = camera->X();
+    camera->Update();
+    EXPECT_GT(camera->X(), previousX);
+    weapon->SetParent(local);
+    WeaponTestAccess::SetCharge(*weapon);
+    EXPECT_THROW(weapon->SetParent(foreign), std::invalid_argument);
+    EXPECT_TRUE(WeaponTestAccess::HasParent(*weapon));
+    EXPECT_FLOAT_EQ(WeaponTestAccess::Charge(*weapon), 0.5f);
+
+    HealthBar rejected(foreign, *camera, 75, team->GetHealthBarTexture());
+    const auto entities = world.GetEntityCount();
+    EXPECT_THROW(rejected.Initialise(game.Context()), std::invalid_argument);
+    EXPECT_FALSE(rejected.HasEntity());
+    EXPECT_EQ(world.GetEntityCount(), entities);
+    HealthBar accepted(local, *camera, 75, team->GetHealthBarTexture());
+    ASSERT_NO_THROW(accepted.Initialise(game.Context()));
+    ASSERT_TRUE(world.GetComponent<Follow>(accepted.GetId()).id);
+    EXPECT_EQ(*world.GetComponent<Follow>(accepted.GetId()).id, local);
+    accepted.CleanUp();
+    focus.CleanUp();
+    world.DestroyEntity(target);
+}
+
+TEST_F(GameLifetime, SettersAndHealthBarRejectAStaleHandleAfterSlotReuse)
+{
+    CreateTestTeam();
+    auto& world = game.Registry();
+    const auto target = world.CreateEntity();
+    world.AddComponent<Position>(target, {1, 2});
+    const auto stale = *world.GetHandle(target);
+    world.DestroyEntity(target);
+    const auto replacement = world.CreateEntity();
+    ASSERT_EQ(entt::to_entity(replacement), entt::to_entity(target));
+    ASSERT_NE(replacement, target);
+    world.AddComponent<Position>(replacement, {90, 90});
+    FocusPoint focus;
+    focus.Initialise(game.Context());
+    focus.ChangeTarget(stale);
+    EXPECT_FALSE(focus.GetPos());
+    camera->ChangeTarget(stale);
+    const auto previousX = camera->X();
+    camera->Update();
+    EXPECT_FLOAT_EQ(camera->X(), previousX);
+    WeaponTestAccess::SetCharge(*weapon);
+    weapon->SetParent(stale);
+    EXPECT_FALSE(WeaponTestAccess::HasParent(*weapon));
+    EXPECT_FLOAT_EQ(WeaponTestAccess::Charge(*weapon), 0);
+    HealthBar bar(stale, *camera, 75, team->GetHealthBarTexture());
+    const auto entities = world.GetEntityCount();
+    EXPECT_THROW(bar.Initialise(game.Context()), std::invalid_argument);
+    EXPECT_FALSE(bar.HasEntity());
+    EXPECT_EQ(world.GetEntityCount(), entities);
+    focus.CleanUp();
+    world.DestroyEntity(replacement);
+}
+
+TEST_F(GameLifetime, RestartedSceneRejectsOldHandlesInRelationAndCollisionApis)
+{
+    auto& scene = game.Scene();
+    const auto stale = *game.Registry().GetHandle(GameTestAccess::ActiveWorm(game));
+    scene.CleanUp();
+    ASSERT_NO_THROW(scene.Initialize());
+    auto& world = game.Registry();
+    ASSERT_EQ(stale.owner, &game.Context().registry);
+    EXPECT_FALSE(world.IsAlive(stale));
+    Camera* restartedCamera = nullptr;
+    Weapon* restartedWeapon = nullptr;
+    for (const auto& object : game.Objects())
+    {
+        if (auto* current = dynamic_cast<Camera*>(object.get())) restartedCamera = current;
+        if (auto* current = dynamic_cast<Weapon*>(object.get())) restartedWeapon = current;
+    }
+    ASSERT_NE(restartedCamera, nullptr);
+    ASSERT_NE(restartedWeapon, nullptr);
+    FocusPoint focus;
+    focus.Initialise(game.Context());
+    focus.ChangeTarget(stale);
+    EXPECT_FALSE(focus.GetPos());
+    restartedCamera->ChangeTarget(stale);
+    const auto previousX = restartedCamera->X();
+    restartedCamera->Update();
+    EXPECT_FLOAT_EQ(restartedCamera->X(), previousX);
+    WeaponTestAccess::SetCharge(*restartedWeapon);
+    restartedWeapon->SetParent(stale);
+    EXPECT_FALSE(WeaponTestAccess::HasParent(*restartedWeapon));
+    EXPECT_FLOAT_EQ(WeaponTestAccess::Charge(*restartedWeapon), 0.f);
+    HealthBar bar(stale, *restartedCamera, 75, nullptr);
+    const auto entities = world.GetEntityCount();
+    EXPECT_THROW(bar.Initialise(game.Context()), std::invalid_argument);
+    EXPECT_FALSE(bar.HasEntity());
+    EXPECT_EQ(world.GetEntityCount(), entities);
+    const auto subscriptions = game.Context().contacts.GetSubscriptionCount();
+    EXPECT_THROW(game.Context().contacts.AddEvent(stale, BEGIN, [](b2Contact*) {}),
+                 std::invalid_argument);
+    EXPECT_NO_THROW(game.Context().contacts.ClearEvent(stale, BEGIN));
+    EXPECT_EQ(game.Context().contacts.GetSubscriptionCount(), subscriptions);
+    focus.CleanUp();
 }
 
 TEST_F(GameLifetime, WeaponRenderClearsMissingParentPositionEvenWhileInactive)
@@ -2480,7 +2601,7 @@ TEST_F(GameLifetime, WeaponRenderClearsMissingParentPositionEvenWhileInactive)
     auto& world = game.Registry();
     const auto target = world.CreateEntity();
     world.AddComponent<Position>(target, {1, 2});
-    weapon->SetParent(target);
+    weapon->SetParent(*world.GetHandle(target));
     weapon->Deactivate();
     WeaponTestAccess::SetCharge(*weapon);
     world.RemoveComponent<Position>(target);
@@ -2513,7 +2634,7 @@ TEST_F(GameLifetime, SurfaceOwnershipMovesAndLocksAreReleasedAfterException)
 
 TEST_F(GameLifetime, InputInterruptionCancelsChargeEvenWhenFocusReturnsInTheSameFrame)
 {
-    weapon->SetParent(GameTestAccess::ActiveWorm(game));
+    weapon->SetParent(*game.Registry().GetHandle(GameTestAccess::ActiveWorm(game)));
     WeaponTestAccess::SetCharge(*weapon);
     const auto pending = game.PendingAddCount();
     game.Inputs().SetEnabled(false);
@@ -2526,7 +2647,7 @@ TEST_F(GameLifetime, InputInterruptionCancelsChargeEvenWhenFocusReturnsInTheSame
 
 TEST_F(GameLifetime, InputInterruptionCancelsChargeAfterSkippedUpdates)
 {
-    weapon->SetParent(GameTestAccess::ActiveWorm(game));
+    weapon->SetParent(*game.Registry().GetHandle(GameTestAccess::ActiveWorm(game)));
     WeaponTestAccess::SetCharge(*weapon);
     const auto pending = game.PendingAddCount();
     game.Inputs().SetEnabled(false);

@@ -19,6 +19,11 @@
 
 namespace
 {
+static_assert(!std::is_invocable_v<decltype(&ContactManager::AddEvent),
+              ContactManager&, EntityId, CollisionType, CollisionCallback>);
+static_assert(!std::is_invocable_v<decltype(&ContactManager::ClearEvent),
+              ContactManager&, EntityId, CollisionType>);
+
 template <auto Method, typename... Args>
 constexpr bool BorrowsNamedPhysicsInfo =
     std::is_invocable_v<decltype(Method), ColliderFactory&, Args..., PhysicsInfo&> &&
@@ -41,8 +46,9 @@ static_assert(BorrowsNamedPhysicsInfo<&ColliderFactory::CreateStaticFixture, b2B
 
 TEST(ColliderFactorySafety, EveryBodyUsesRequestedPositionAndBorrowedMetadata)
 {
-    ContactManager contacts;
-    PhysicsInfo info{PhysicsTag::NONE, static_cast<EntityId>(7)};
+    entt::registry registry;
+    ContactManager contacts{registry};
+    PhysicsInfo info{PhysicsTag::NONE, registry.create()};
     b2World world({0, 0});
     ColliderFactory factory(world, contacts);
     b2PolygonShape shape;
@@ -71,8 +77,9 @@ TEST(ColliderFactorySafety, EveryBodyUsesRequestedPositionAndBorrowedMetadata)
 
 TEST(ColliderFactorySafety, EveryFixtureBorrowsTheSuppliedMetadata)
 {
-    ContactManager contacts;
-    PhysicsInfo info{PhysicsTag::NONE, static_cast<EntityId>(7)};
+    entt::registry registry;
+    ContactManager contacts{registry};
+    PhysicsInfo info{PhysicsTag::NONE, registry.create()};
     b2World world({0, 0});
     ColliderFactory factory(world, contacts);
     b2BodyDef bodyDef;
@@ -404,27 +411,29 @@ protected:
         world.SetContactListener(nullptr);
         contacts.ClearAll();
     }
-    ContactManager contacts;
-    PhysicsInfo info{PhysicsTag::NONE, static_cast<EntityId>(0)};
+    entt::registry registry;
+    ContactManager contacts{registry};
+    PhysicsInfo info{PhysicsTag::NONE, registry.create()};
     b2World world{b2Vec2{0, 0}};
     b2Body* movingBody = nullptr;
 };
 
 TEST_F(ContactCleanup, IndependentWorldsDispatchTheSameEntityIdToTheirOwnListeners)
 {
-    ContactManager otherContacts;
+    entt::registry otherRegistry;
+    ContactManager otherContacts(otherRegistry);
     b2World otherWorld({0, 0});
     otherWorld.SetContactListener(&otherContacts);
     ColliderFactory factory(world, contacts);
     ColliderFactory otherFactory(otherWorld, otherContacts);
-    PhysicsInfo fixedInfo{PhysicsTag::NONE, info.id};
-    PhysicsInfo movingInfo{PhysicsTag::NONE, static_cast<EntityId>(entt::to_integral(info.id) + 1)};
+    PhysicsInfo fixedInfo{PhysicsTag::NONE, otherRegistry.create()};
+    PhysicsInfo movingInfo{PhysicsTag::NONE, otherRegistry.create()};
     b2PolygonShape shape;
     shape.SetAsBox(0.5f, 0.5f);
     auto otherFixed = otherFactory.CreateStaticBody(&shape, {0, 0}, fixedInfo);
     auto otherMoving = otherFactory.CreateDynamicBody(&shape, {0, 0}, movingInfo);
     int firstCalls = 0, otherCalls = 0;
-    contacts.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++firstCalls; });
+    contacts.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { ++firstCalls; });
     otherFixed.AddOnColliderEnter([&](b2Contact*) { ++otherCalls; });
     otherWorld.Step(1.f / 60, 8, 3);
     EXPECT_EQ(firstCalls, 0);
@@ -437,8 +446,15 @@ TEST_F(ContactCleanup, IndependentWorldsDispatchTheSameEntityIdToTheirOwnListene
     otherContacts.BeginContact(otherWorld.GetContactList());
     EXPECT_EQ(otherCalls, 2);
     EXPECT_EQ(otherContacts.GetSubscriptionCount(), 1);
+    // Once bound, a listener rejects contacts from another physics world even for identical IDs.
+    contacts.BeginContact(otherWorld.GetContactList());
+    EXPECT_EQ(firstCalls, 1);
     EXPECT_THROW(factory.CreateStaticFixture(otherFixed.GetBody(), &shape, fixedInfo),
                  std::invalid_argument);
+    const auto bodies = world.GetBodyCount();
+    EXPECT_THROW(factory.CreateStaticBody(&shape, {0, 0}, fixedInfo), std::invalid_argument);
+    EXPECT_EQ(world.GetBodyCount(), bodies);
+    EXPECT_THROW(ColliderFactory(otherWorld, contacts), std::invalid_argument);
     otherFixed.ClearOnColliderEnter();
     EXPECT_EQ(otherContacts.GetSubscriptionCount(), 0);
     otherWorld.SetContactListener(nullptr);
@@ -446,12 +462,68 @@ TEST_F(ContactCleanup, IndependentWorldsDispatchTheSameEntityIdToTheirOwnListene
     otherWorld.DestroyBody(otherFixed.GetBody());
 }
 
+TEST_F(ContactCleanup, BoundListenerIgnoresMetadataFromAnotherPhysicsWorld)
+{
+    ColliderFactory factory(world, contacts);
+    b2World foreignWorld({0, 0});
+    info.world = &foreignWorld;
+    int calls = 0;
+    contacts.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { ++calls; });
+    contacts.BeginContact(world.GetContactList());
+    EXPECT_EQ(calls, 0);
+    EXPECT_FALSE(GetEntityWithTag(world.GetContactList(), info.tag));
+    EXPECT_FALSE(GetObjectWithTag(world.GetContactList(), info.tag));
+    info.world = &world;
+    contacts.BeginContact(world.GetContactList());
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(GetEntityWithTag(world.GetContactList(), info.tag), info.id);
+    EXPECT_TRUE(GetObjectWithTag(world.GetContactList(), info.tag));
+    EXPECT_THROW(contacts.AddEvent(EntityHandle{entt::null, &registry}, BEGIN, [](b2Contact*) {}), std::invalid_argument);
+}
+
+TEST_F(ContactCleanup, ForeignHandlesCannotRegisterOrClearLocalCallbacks)
+{
+    entt::registry foreignRegistry;
+    const auto foreignId = foreignRegistry.create();
+    ASSERT_EQ(foreignId, info.id);
+    const EntityHandle local{info.id, &registry};
+    const EntityHandle foreign{foreignId, &foreignRegistry};
+    int calls = 0;
+    contacts.AddEvent(local, BEGIN, [&](b2Contact*) { ++calls; });
+    EXPECT_THROW(contacts.AddEvent(foreign, BEGIN, [](b2Contact*) {}), std::invalid_argument);
+    EXPECT_THROW(contacts.ClearEvent(foreign, BEGIN), std::invalid_argument);
+    EXPECT_EQ(contacts.GetSubscriptionCount(), 1u);
+    contacts.BeginContact(world.GetContactList());
+    EXPECT_EQ(calls, 1);
+}
+
+TEST_F(ContactCleanup, StaleHandlesCannotRegisterOrClearReplacementCallbacks)
+{
+    const EntityHandle stale{info.id, &registry};
+    contacts.AddEvent(stale, BEGIN, [](b2Contact*) {});
+    registry.destroy(info.id);
+    const auto replacement = registry.create();
+    ASSERT_EQ(entt::to_entity(replacement), entt::to_entity(stale.id));
+    ASSERT_NE(replacement, stale.id);
+    const EntityHandle fresh{replacement, &registry};
+    EXPECT_THROW(contacts.AddEvent(stale, BEGIN, [](b2Contact*) {}), std::invalid_argument);
+    int calls = 0;
+    contacts.AddEvent(fresh, BEGIN, [&](b2Contact*) { ++calls; });
+    EXPECT_NO_THROW(contacts.ClearEvent(stale, BEGIN));
+    EXPECT_EQ(contacts.GetSubscriptionCount(), 1u);
+    info.id = replacement;
+    contacts.BeginContact(world.GetContactList());
+    EXPECT_EQ(calls, 1);
+    contacts.ClearEvent(fresh, BEGIN);
+    EXPECT_EQ(contacts.GetSubscriptionCount(), 0u);
+}
+
 TEST_F(ContactCleanup, PendingExceptionsAndClearAllAreLocalToEachManager)
 {
-    ContactManager other;
-    contacts.AddEvent(info.id, BEGIN,
+    ContactManager other(registry);
+    contacts.AddEvent(EntityHandle{info.id, &registry}, BEGIN,
                       [](b2Contact*) { throw std::runtime_error("Local failure"); });
-    other.AddEvent(info.id, BEGIN, [](b2Contact*) {});
+    other.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [](b2Contact*) {});
     contacts.BeginContact(world.GetContactList());
     EXPECT_FALSE(other.TakePendingException());
     other.ClearAll();
@@ -465,10 +537,10 @@ TEST_F(ContactCleanup, ClearedEntityCanRegisterAnotherCallback)
     auto& manager = contacts;
     int oldCalls = 0;
     int newCalls = 0;
-    manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++oldCalls; });
-    manager.ClearEvent(info.id, BEGIN);
-    manager.ClearEvent(info.id, BEGIN);
-    manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++newCalls; });
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { ++oldCalls; });
+    manager.ClearEvent(EntityHandle{info.id, &registry}, BEGIN);
+    manager.ClearEvent(EntityHandle{info.id, &registry}, BEGIN);
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { ++newCalls; });
     ASSERT_NE(world.GetContactList(), nullptr);
     manager.BeginContact(world.GetContactList());
     EXPECT_EQ(oldCalls, 0);
@@ -478,7 +550,7 @@ TEST_F(ContactCleanup, ClearedEntityCanRegisterAnotherCallback)
 TEST_F(ContactCleanup, EndCallbackDoesNotRequireBeginCallback)
 {
     int endCalls = 0;
-    contacts.AddEvent(info.id, END, [&](b2Contact*) { ++endCalls; });
+    contacts.AddEvent(EntityHandle{info.id, &registry}, END, [&](b2Contact*) { ++endCalls; });
     movingBody->SetTransform(b2Vec2{3, 0}, 0);
     world.Step(1.f / 60, 8, 3);
     EXPECT_EQ(endCalls, 1);
@@ -493,14 +565,14 @@ TEST_F(ContactCleanup, TagHelpersSkipMissingUserDataOnEitherFixture)
     auto* second = contact->GetFixtureB();
     first->GetUserData().pointer = 0;
     second->GetUserData().pointer = reinterpret_cast<uintptr_t>(&info);
-    EXPECT_EQ(GetEntityWithTag(contact, WORM), std::optional<EntityId>{static_cast<EntityId>(0)});
+    EXPECT_EQ(GetEntityWithTag(contact, WORM), std::optional<EntityId>{info.id});
     EXPECT_EQ(GetObjectWithTag(contact, WORM), std::optional<b2Body*>{second->GetBody()});
     EXPECT_FALSE(GetEntityWithTag(contact, DESTRUCTION_FIELD));
     EXPECT_FALSE(GetObjectWithTag(contact, DESTRUCTION_FIELD));
 
     first->GetUserData().pointer = reinterpret_cast<uintptr_t>(&info);
     second->GetUserData().pointer = 0;
-    EXPECT_EQ(GetEntityWithTag(contact, WORM), std::optional<EntityId>{static_cast<EntityId>(0)});
+    EXPECT_EQ(GetEntityWithTag(contact, WORM), std::optional<EntityId>{info.id});
     EXPECT_EQ(GetObjectWithTag(contact, WORM), std::optional<b2Body*>{first->GetBody()});
     EXPECT_FALSE(GetEntityWithTag(contact, DESTRUCTION_FIELD));
     EXPECT_FALSE(GetObjectWithTag(contact, DESTRUCTION_FIELD));
@@ -522,9 +594,9 @@ TEST_F(ContactCleanup, MultipleCallbacksRunInRegistrationOrder)
 {
     auto& manager = contacts;
     std::vector<int> calls;
-    manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { calls.push_back(1); });
-    manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { calls.push_back(2); });
-    manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { calls.push_back(3); });
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { calls.push_back(1); });
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { calls.push_back(2); });
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { calls.push_back(3); });
     manager.BeginContact(world.GetContactList());
     EXPECT_EQ(calls, (std::vector<int>{1, 2, 3}));
 }
@@ -533,8 +605,8 @@ TEST_F(ContactCleanup, RemovingOneCallbackPreservesOthersAndIsIdempotent)
 {
     auto& manager = contacts;
     int removed = 0, remaining = 0;
-    auto id = manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++removed; });
-    manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++remaining; });
+    auto id = manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { ++removed; });
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { ++remaining; });
     EXPECT_NE(id, 0u);
     EXPECT_TRUE(manager.RemoveEvent(id));
     EXPECT_FALSE(manager.RemoveEvent(id));
@@ -550,7 +622,7 @@ TEST_F(ContactCleanup, SelfRemovalKeepsExecutingCallbackAlive)
     auto state = std::make_shared<int>(0);
     std::weak_ptr<int> lifetime = state;
     SubscriptionId id = 0;
-    id = manager.AddEvent(info.id, BEGIN, [&, state](b2Contact*)
+    id = manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&, state](b2Contact*)
     {
         EXPECT_TRUE(manager.RemoveEvent(id));
         EXPECT_FALSE(lifetime.expired());
@@ -567,8 +639,8 @@ TEST_F(ContactCleanup, CallbackCanRemoveAnotherPendingCallback)
     auto& manager = contacts;
     SubscriptionId second = 0;
     int calls = 0;
-    manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { manager.RemoveEvent(second); });
-    second = manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++calls; });
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { manager.RemoveEvent(second); });
+    second = manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { ++calls; });
     manager.BeginContact(world.GetContactList());
     EXPECT_EQ(calls, 0);
 }
@@ -578,12 +650,12 @@ TEST_F(ContactCleanup, AddedCallbackWaitsUntilNextDispatch)
     auto& manager = contacts;
     int calls = 0;
     bool added = false;
-    manager.AddEvent(info.id, BEGIN, [&](b2Contact*)
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*)
     {
         if (!added)
         {
             added = true;
-            manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++calls; });
+            manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { ++calls; });
         }
     });
     manager.BeginContact(world.GetContactList());
@@ -596,9 +668,9 @@ TEST_F(ContactCleanup, ClearingEntityDuringCallbackSkipsRemainingCallbacks)
 {
     auto& manager = contacts;
     int beginCalls = 0, endCalls = 0;
-    manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { manager.ClearEvent(info.id, BEGIN); });
-    manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++beginCalls; });
-    manager.AddEvent(info.id, END, [&](b2Contact*) { ++endCalls; });
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { manager.ClearEvent(EntityHandle{info.id, &registry}, BEGIN); });
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { ++beginCalls; });
+    manager.AddEvent(EntityHandle{info.id, &registry}, END, [&](b2Contact*) { ++endCalls; });
     manager.BeginContact(world.GetContactList());
     manager.EndContact(world.GetContactList());
     EXPECT_EQ(beginCalls, 0);
@@ -609,9 +681,9 @@ TEST_F(ContactCleanup, ClearingAllDuringCallbackSkipsRemainingCallbacks)
 {
     auto& manager = contacts;
     int calls = 0;
-    manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { manager.ClearAll(); });
-    manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++calls; });
-    manager.AddEvent(info.id, END, [&](b2Contact*) { ++calls; });
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { manager.ClearAll(); });
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { ++calls; });
+    manager.AddEvent(EntityHandle{info.id, &registry}, END, [&](b2Contact*) { ++calls; });
     manager.BeginContact(world.GetContactList());
     manager.EndContact(world.GetContactList());
     EXPECT_EQ(calls, 0);
@@ -620,10 +692,10 @@ TEST_F(ContactCleanup, ClearingAllDuringCallbackSkipsRemainingCallbacks)
 TEST_F(ContactCleanup, OldHandleAfterClearAllCannotRemoveNewSubscription)
 {
     auto& manager = contacts;
-    auto old = manager.AddEvent(info.id, BEGIN, [](b2Contact*) {});
+    auto old = manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [](b2Contact*) {});
     manager.ClearAll();
     int calls = 0;
-    auto fresh = manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++calls; });
+    auto fresh = manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { ++calls; });
     EXPECT_NE(old, fresh);
     EXPECT_FALSE(manager.RemoveEvent(old));
     manager.BeginContact(world.GetContactList());
@@ -634,10 +706,10 @@ TEST_F(ContactCleanup, ClearAndRegisterDuringCallbackDoesNotRunReplacementImmedi
 {
     auto& manager = contacts;
     int calls = 0;
-    manager.AddEvent(info.id, BEGIN, [&](b2Contact*)
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*)
     {
         manager.ClearAll();
-        manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++calls; });
+        manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { ++calls; });
     });
     manager.BeginContact(world.GetContactList());
     EXPECT_EQ(calls, 0);
@@ -649,7 +721,7 @@ TEST_F(ContactCleanup, MutableCallbackStatePersistsBetweenDispatches)
 {
     auto& manager = contacts;
     int observed = 0;
-    manager.AddEvent(info.id, BEGIN, [&, count = 0](b2Contact*) mutable { observed = ++count; });
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&, count = 0](b2Contact*) mutable { observed = ++count; });
     manager.BeginContact(world.GetContactList());
     manager.BeginContact(world.GetContactList());
     EXPECT_EQ(observed, 2);
@@ -658,10 +730,10 @@ TEST_F(ContactCleanup, MutableCallbackStatePersistsBetweenDispatches)
 TEST_F(ContactCleanup, InvalidCallbacksAndUnsupportedTypesAreRejected)
 {
     auto& manager = contacts;
-    EXPECT_THROW(manager.AddEvent(info.id, BEGIN, {}), std::invalid_argument);
-    EXPECT_THROW(manager.AddEvent(info.id, WHILE_SENSOR_ONLY, [](b2Contact*) {}), std::invalid_argument);
-    EXPECT_THROW(manager.AddEvent(info.id, static_cast<CollisionType>(99), [](b2Contact*) {}), std::invalid_argument);
-    EXPECT_THROW(manager.ClearEvent(info.id, static_cast<CollisionType>(99)), std::invalid_argument);
+    EXPECT_THROW(manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, {}), std::invalid_argument);
+    EXPECT_THROW(manager.AddEvent(EntityHandle{info.id, &registry}, WHILE_SENSOR_ONLY, [](b2Contact*) {}), std::invalid_argument);
+    EXPECT_THROW(manager.AddEvent(EntityHandle{info.id, &registry}, static_cast<CollisionType>(99), [](b2Contact*) {}), std::invalid_argument);
+    EXPECT_THROW(manager.ClearEvent(EntityHandle{info.id, &registry}, static_cast<CollisionType>(99)), std::invalid_argument);
 }
 
 TEST_F(ContactCleanup, NestedDispatchCanRemoveTheOuterPendingCallback)
@@ -670,7 +742,7 @@ TEST_F(ContactCleanup, NestedDispatchCanRemoveTheOuterPendingCallback)
     SubscriptionId second = 0;
     bool nested = false;
     int calls = 0;
-    manager.AddEvent(info.id, BEGIN, [&](b2Contact* contact)
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact* contact)
     {
         if (!nested)
         {
@@ -679,7 +751,7 @@ TEST_F(ContactCleanup, NestedDispatchCanRemoveTheOuterPendingCallback)
         }
         else manager.RemoveEvent(second);
     });
-    second = manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++calls; });
+    second = manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { ++calls; });
     manager.BeginContact(world.GetContactList());
     EXPECT_EQ(calls, 0);
 }
@@ -689,17 +761,17 @@ TEST_F(ContactCleanup, AddedCallbackForOtherFixtureWaitsUntilNextContactDispatch
     auto& manager = contacts;
     auto* contact = world.GetContactList();
     ASSERT_NE(contact, nullptr);
-    PhysicsInfo other{PhysicsTag::NONE, static_cast<EntityId>(1)};
+    PhysicsInfo other{PhysicsTag::NONE, registry.create()};
     contact->GetFixtureA()->GetUserData().pointer = reinterpret_cast<uintptr_t>(&info);
     contact->GetFixtureB()->GetUserData().pointer = reinterpret_cast<uintptr_t>(&other);
     int calls = 0;
     bool added = false;
-    manager.AddEvent(info.id, BEGIN, [&](b2Contact*)
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*)
     {
         if (!added)
         {
             added = true;
-            manager.AddEvent(other.id, BEGIN, [&](b2Contact*) { ++calls; });
+            manager.AddEvent(EntityHandle{other.id, &registry}, BEGIN, [&](b2Contact*) { ++calls; });
         }
     });
     manager.BeginContact(contact);
@@ -714,12 +786,12 @@ TEST_F(ContactCleanup, ExceptionAfterSelfRemovalDoesNotCorruptRegistry)
     auto& manager = contacts;
     SubscriptionId id = 0;
     int calls = 0;
-    id = manager.AddEvent(info.id, BEGIN, [&](b2Contact*)
+    id = manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*)
     {
         manager.RemoveEvent(id);
         throw std::runtime_error("Callback failure");
     });
-    manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++calls; });
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { ++calls; });
     EXPECT_NO_THROW(manager.BeginContact(world.GetContactList()));
     EXPECT_THROW(manager.RethrowPendingException(), std::runtime_error);
     EXPECT_NO_THROW(manager.RethrowPendingException());
@@ -734,8 +806,8 @@ TEST_F(ContactCleanup, BeginExceptionDuringRealStepLeavesWorldUnlocked)
     movingBody->SetTransform(b2Vec2{3, 0}, 0);
     world.Step(1.f / 60, 8, 3);
     int remainingCalls = 0;
-    manager.AddEvent(info.id, BEGIN, [](b2Contact*) { throw std::runtime_error("Begin failure"); });
-    manager.AddEvent(info.id, BEGIN, [&](b2Contact*) { ++remainingCalls; });
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [](b2Contact*) { throw std::runtime_error("Begin failure"); });
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [&](b2Contact*) { ++remainingCalls; });
     movingBody->SetTransform(b2Vec2{0, 0}, 0);
     // The first step discovers the new pair; the second updates its contact.
     EXPECT_NO_THROW(world.Step(1.f / 60, 8, 3));
@@ -751,7 +823,7 @@ TEST_F(ContactCleanup, BeginExceptionDuringRealStepLeavesWorldUnlocked)
 TEST_F(ContactCleanup, EndExceptionDuringRealStepLeavesWorldUnlocked)
 {
     auto& manager = contacts;
-    manager.AddEvent(info.id, END, [](b2Contact*) { throw std::runtime_error("End failure"); });
+    manager.AddEvent(EntityHandle{info.id, &registry}, END, [](b2Contact*) { throw std::runtime_error("End failure"); });
     movingBody->SetTransform(b2Vec2{3, 0}, 0);
     EXPECT_NO_THROW(world.Step(1.f / 60, 8, 3));
     EXPECT_FALSE(world.IsLocked());
@@ -764,8 +836,8 @@ TEST_F(ContactCleanup, EndExceptionDuringBodyDestructionDoesNotInterruptCleanup)
 {
     auto& manager = contacts;
     int remainingCalls = 0;
-    manager.AddEvent(info.id, END, [](b2Contact*) { throw std::runtime_error("Destroy failure"); });
-    manager.AddEvent(info.id, END, [&](b2Contact*) { ++remainingCalls; });
+    manager.AddEvent(EntityHandle{info.id, &registry}, END, [](b2Contact*) { throw std::runtime_error("Destroy failure"); });
+    manager.AddEvent(EntityHandle{info.id, &registry}, END, [&](b2Contact*) { ++remainingCalls; });
     EXPECT_NO_THROW(world.DestroyBody(movingBody));
     movingBody = nullptr;
     EXPECT_FALSE(world.IsLocked());
@@ -780,8 +852,8 @@ TEST_F(ContactCleanup, EndExceptionDuringBodyDestructionDoesNotInterruptCleanup)
 TEST_F(ContactCleanup, FirstExceptionIsPreservedUntilConsumedEvenAfterClearAll)
 {
     auto& manager = contacts;
-    manager.AddEvent(info.id, BEGIN, [](b2Contact*) { throw std::logic_error("First failure"); });
-    manager.AddEvent(info.id, BEGIN, [](b2Contact*) { throw std::runtime_error("Second failure"); });
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [](b2Contact*) { throw std::logic_error("First failure"); });
+    manager.AddEvent(EntityHandle{info.id, &registry}, BEGIN, [](b2Contact*) { throw std::runtime_error("Second failure"); });
     EXPECT_NO_THROW(manager.BeginContact(world.GetContactList()));
     manager.ClearAll();
     EXPECT_THROW(manager.RethrowPendingException(), std::logic_error);
@@ -791,7 +863,7 @@ TEST_F(ContactCleanup, FirstExceptionIsPreservedUntilConsumedEvenAfterClearAll)
 TEST_F(ContactCleanup, NonStandardExceptionIsDeferredAndCanBeConsumed)
 {
     auto& manager = contacts;
-    manager.AddEvent(info.id, END, [](b2Contact*) { throw 42; });
+    manager.AddEvent(EntityHandle{info.id, &registry}, END, [](b2Contact*) { throw 42; });
     EXPECT_NO_THROW(world.DestroyBody(movingBody));
     movingBody = nullptr;
     EXPECT_FALSE(world.IsLocked());

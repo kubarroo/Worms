@@ -78,7 +78,7 @@ void WormManager::OnCameraTargetLost()
 
     nextTeamAlreadySelected = false;
 
-    const EntityId wormId = GetActiveWormId();
+    const EntityHandle wormId = GetActiveWormHandle();
     weapon.SetParent(wormId);
     camera.ChangeTarget(wormId);
     weapon.Activate();
@@ -157,7 +157,7 @@ void WormManager::DeleteTeam(WormTeam* team)
     {
         nextTeamAlreadySelected = true;
         weapon.Deactivate();
-        weapon.SetParent(GetActiveWormId());
+        weapon.SetParent(GetActiveWormHandle());
     }
 }
 
@@ -173,7 +173,7 @@ void WormManager::ChangeTeam()
     activeTeam = (activeTeam + 1) % static_cast<int>(teams.size());
     ChangeActiveWorm();
 
-    const EntityId activeWorm = GetActiveWormId();
+    const EntityHandle activeWorm = GetActiveWormHandle();
     weapon.SetParent(activeWorm);
     camera.ChangeTarget(activeWorm);
 }
@@ -188,7 +188,7 @@ void WormManager::ChangeActiveWorm()
     ActiveTeamCheck();
     teams[activeTeam]->ChangeActiveWorm();
 
-    const EntityId activeWorm = GetActiveWormId();
+    const EntityHandle activeWorm = GetActiveWormHandle();
     weapon.SetParent(activeWorm);
     camera.ChangeTarget(activeWorm);
 }
@@ -224,7 +224,7 @@ void WormManager::Update()
     ActiveTeamCheck();
     if (!teams.empty())
     {
-        weapon.SetParent(GetActiveWormId());
+        weapon.SetParent(GetActiveWormHandle());
     }
     else
     {

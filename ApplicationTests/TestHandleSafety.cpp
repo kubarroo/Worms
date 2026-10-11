@@ -20,6 +20,8 @@ static_assert(!std::is_move_constructible_v<GameObject>);
 static_assert(!std::is_move_assignable_v<GameObject>);
 static_assert(!std::is_reference_v<decltype(std::declval<Camera&>().X())>);
 static_assert(!std::is_reference_v<decltype(std::declval<Camera&>().Y())>);
+static_assert(!std::is_invocable_v<decltype(&Camera::ChangeTarget), Camera&, EntityId>);
+static_assert(!std::is_invocable_v<decltype(&FocusPoint::ChangeTarget), FocusPoint&, EntityId>);
 
 namespace
 {
@@ -55,7 +57,7 @@ TEST(HandleSafety, EntityZeroIsValidAndCleanupCanBeRepeated)
     auto world = std::make_unique<World>(registry);
     b2World physics({0, 0});
     HeadlessCommands commands;
-    ContactManager contacts;
+    ContactManager contacts(registry);
     ColliderFactory colliders(physics, contacts);
     ResourceManager resources(nullptr, ".");
     Renderer2D rendering(nullptr);
@@ -66,10 +68,12 @@ TEST(HandleSafety, EntityZeroIsValidAndCleanupCanBeRepeated)
     GameObject object;
     EXPECT_FALSE(object.HasEntity());
     EXPECT_THROW(object.GetId(), std::logic_error);
+    EXPECT_THROW(object.GetHandle(), std::logic_error);
     EXPECT_NO_THROW(object.CleanUp());
 
     object.Initialise(context);
     EXPECT_TRUE(object.HasEntity());
+    EXPECT_TRUE(world->IsAlive(object.GetHandle()));
     EXPECT_EQ(entt::to_integral(object.GetId()), 0u);
     world->AddComponent<Position>(object.GetId(), {1, 2});
     EXPECT_THROW(object.Initialise(context), std::logic_error);
@@ -86,7 +90,7 @@ TEST(HandleSafety, FocusPointCanHaveNoTargetOrTargetEntityZero)
     auto world = std::make_unique<World>(registry);
     b2World physics({0, 0});
     HeadlessCommands commands;
-    ContactManager contacts;
+    ContactManager contacts(registry);
     ColliderFactory colliders(physics, contacts);
     ResourceManager resources(nullptr, ".");
     Renderer2D rendering(nullptr);
@@ -99,12 +103,12 @@ TEST(HandleSafety, FocusPointCanHaveNoTargetOrTargetEntityZero)
     FocusPoint focus;
     focus.Initialise(context);
     EXPECT_FALSE(focus.GetPos());
-    focus.ChangeTarget(target);
+    focus.ChangeTarget(*world->GetHandle(target));
     ASSERT_TRUE(focus.GetPos());
     EXPECT_FLOAT_EQ(focus.GetPos()->x, 3);
     focus.ClearTarget();
     EXPECT_FALSE(focus.GetPos());
-    focus.ChangeTarget(target);
+    focus.ChangeTarget(*world->GetHandle(target));
     world->DestroyEntity(target);
     EXPECT_FALSE(focus.GetPos());
     focus.CleanUp();
@@ -119,7 +123,7 @@ TEST(HandleSafety, CameraReadsItsPositionAfterComponentCompaction)
     auto world = std::make_unique<World>(registry);
     b2World physics({0, 0});
     HeadlessCommands commands;
-    ContactManager contacts;
+    ContactManager contacts(registry);
     ColliderFactory colliders(physics, contacts);
     ResourceManager resources(nullptr, ".");
     Renderer2D rendering(nullptr);
@@ -205,7 +209,7 @@ TEST(HandleSafety, ObserversClearMissingPositionAndDoNotResumeAfterItIsAddedBack
     auto world = std::make_unique<World>(registry);
     b2World physics({0, 0});
     HeadlessCommands commands;
-    ContactManager contacts;
+    ContactManager contacts(registry);
     ColliderFactory colliders(physics, contacts);
     ResourceManager resources(nullptr, ".");
     Renderer2D rendering(nullptr);
@@ -220,7 +224,7 @@ TEST(HandleSafety, ObserversClearMissingPositionAndDoNotResumeAfterItIsAddedBack
     world->AddComponent<Follow>(follower, {world->GetHandle(target), 0, 0});
     FocusPoint focus;
     focus.Initialise(context);
-    focus.ChangeTarget(target);
+    focus.ChangeTarget(*world->GetHandle(target));
     const auto snapshot = focus.GetPos();
     ASSERT_TRUE(snapshot);
     world->RemoveComponent<Position>(target);
@@ -242,7 +246,7 @@ TEST(HandleSafety, FocusPointResolvesPositionAfterAnotherComponentIsCompacted)
     auto world = std::make_unique<World>(registry);
     b2World physics({0, 0});
     HeadlessCommands commands;
-    ContactManager contacts;
+    ContactManager contacts(registry);
     ColliderFactory colliders(physics, contacts);
     ResourceManager resources(nullptr, ".");
     Renderer2D rendering(nullptr);
@@ -256,7 +260,7 @@ TEST(HandleSafety, FocusPointResolvesPositionAfterAnotherComponentIsCompacted)
     world->AddComponent<Position>(target, {1, 2});
     FocusPoint focus;
     focus.Initialise(context);
-    focus.ChangeTarget(target);
+    focus.ChangeTarget(*world->GetHandle(target));
     world->DestroyEntity(other);
     ASSERT_TRUE(focus.GetPos());
     EXPECT_FLOAT_EQ(focus.GetPos()->x, 1);
@@ -336,7 +340,7 @@ TEST(HandleSafety, SpriteRendererUsesExplicitOrderAcrossCompactionSlotReuseAndLa
     World world(registry);
     b2World physics({0, 0});
     HeadlessCommands commands;
-    ContactManager contacts;
+    ContactManager contacts(registry);
     ColliderFactory colliders(physics, contacts);
     ResourceManager resources(nullptr, ".");
     Audio audio;

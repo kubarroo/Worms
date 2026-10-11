@@ -17,13 +17,17 @@ public:
     void DeleteTeam(WormTeam* team);
     EntityId GetActiveWormId()
     {
+        return GetActiveWormHandle().id;
+    }
+    EntityHandle GetActiveWormHandle()
+    {
         if (teams.empty())
         {
             throw std::logic_error("No active team");
         }
 
         ActiveTeamCheck();
-        return teams[activeTeam]->GetActiveWorm();
+        return teams[activeTeam]->GetActiveWormHandle();
     }
     void RenderHealthBars();
     void Update();

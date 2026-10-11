@@ -1,5 +1,6 @@
 #pragma once
 #include "ECS/ECS_Types.h"
+#include <entt/entity/registry.hpp>
 #include <box2d/b2_contact.h>
 #include <box2d/b2_fixture.h>
 #include <box2d/box2d.h>
@@ -9,6 +10,7 @@
 #include <memory>
 #include <vector>
 #include <exception>
+#include <stdexcept>
 
 enum CollisionType
 {
@@ -27,7 +29,14 @@ class ContactManager : public b2ContactListener
 public:
     ContactManager(const ContactManager&) = delete;
     ContactManager(ContactManager&&) = delete;
-    ContactManager() = default;
+    explicit ContactManager(const entt::registry& registry) : registry(registry) {}
+    const entt::registry& Registry() const noexcept { return registry; }
+    void BindPhysicsWorld(const b2World& world)
+    {
+        if (physicsWorld && physicsWorld != &world)
+            throw std::invalid_argument("Contact manager belongs to another physics world");
+        physicsWorld = &world;
+    }
     // Internal Use Only
     void BeginContact(b2Contact* contact) noexcept override;
     void EndContact(b2Contact* contact) noexcept override;
@@ -35,10 +44,11 @@ public:
     void Update();
 
     // Registrations added during dispatch wait for the next contact notification.
-    SubscriptionId AddEvent(EntityId entId, CollisionType type, CollisionCallback callback);
+    SubscriptionId AddEvent(EntityHandle entity, CollisionType type, CollisionCallback callback);
     // Removing an executing callback keeps it alive until its invocation returns.
     bool RemoveEvent(SubscriptionId subscription);
-    void ClearEvent(const EntityId entId, const CollisionType);
+    // Stale local handles may still remove subscriptions for their original generation.
+    void ClearEvent(EntityHandle entity, CollisionType type);
 
     void ClearAll();
     std::size_t GetSubscriptionCount() const noexcept { return subscriptions.size(); }
@@ -65,4 +75,6 @@ private:
 
     EventMap beginEvents;
     EventMap endEvents;
+    const entt::registry& registry;
+    const b2World* physicsWorld = nullptr;
 };
