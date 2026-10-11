@@ -23,21 +23,21 @@ void Map::Initialise(const SceneContext& context)
     try
     {
         physicsInfo = {PhysicsTag::MAP, objectId, &context.physics};
-        world->AddComponent<Position>(objectId, {1.5f, -2.f});
+        Registry().emplace<Position>(objectId, Position{1.5f, -2.f});
         const auto mapPath = (context.resources.AssetRoot() / "map.png").string();
         physTex = IMG_LoadPhysicTexture(renderer, mapPath.c_str());
         SDL_CHECK((physTex ? physTex->surface.get() : nullptr));
         destructionSubscription =
             Context().contacts.AddEvent(GetHandle(), CollisionType::BEGIN,
                                         std::bind(&Map::DestroyMap, this, std::placeholders::_1));
-        world->AddComponent<RigidBody>(objectId);
+        Registry().emplace<RigidBody>(objectId);
         mapTexture.reset(SDL_CreateTextureFromSurface(renderer, physTex->surface.get()));
         SDL_CHECK(mapTexture.get());
         const auto size = context.rendering.TextureSize(mapTexture.get());
         mapSize = {size.x, size.y};
-        world->AddComponent<RenderOrder>(objectId,
+        Registry().emplace<RenderOrder>(objectId,
             NextRenderOrder(context.registry, RenderLayer::Terrain));
-        world->AddComponent<Sprite>(objectId, {mapTexture.get()});
+        Registry().emplace<Sprite>(objectId, Sprite{mapTexture.get()});
         CreateNewColliders();
     }
     catch (...)
@@ -52,13 +52,13 @@ void Map::Update()
     if (!HasEntity() || !physTex || !destroyed || physicsWorld->IsLocked())
         return;
 
-    Position mapPos = world->GetComponent<Position>(objectId);
+    Position mapPos = Registry().get<Position>(objectId);
     DestroyMapAtLocalPoint(GlobalToLocalPos(mapPos));
     Sdl::TexturePtr texture(SDL_CreateTextureFromSurface(renderer, physTex->surface.get()));
     SDL_CHECK(texture.get());
     CreateNewColliders();
 
-    world->GetComponent<Sprite>(objectId).texture = texture.get();
+    Registry().get<Sprite>(objectId).texture = texture.get();
     mapTexture = std::move(texture);
     destroyed = false;
 }
@@ -119,7 +119,9 @@ void Map::DestroyMap(b2Contact* contact)
     if (!entId.has_value())
         return;
 
-    bulltetPos = world->GetComponent<Position>(entId.value());
+    const auto* position = Registry().valid(*entId) ? Registry().try_get<Position>(*entId) : nullptr;
+    if (!position) throw std::logic_error("Destruction field has no position component");
+    bulltetPos = *position;
     auto contactBody = GetObjectWithTag(contact, PhysicsTag::DESTRUCTION_FIELD);
     destructionRadius =
         reinterpret_cast<Parameters*>(contactBody.value()->GetUserData().pointer)->explosionRadius;
@@ -155,8 +157,9 @@ void Map::CreateNewColliders()
     {
         b2ChainShape shape;
         shape.CreateLoop(physPoints.front().data(), static_cast<int32>(physPoints.front().size()));
-        const auto& pos = world->GetComponent<Position>(objectId);
-        auto collider = Context().colliders.CreateStaticBody(&shape, {pos.x, pos.y}, physicsInfo);
+        const auto* pos = Registry().try_get<Position>(objectId);
+        if (!pos) throw std::logic_error("Map has no position component");
+        auto collider = Context().colliders.CreateStaticBody(&shape, {pos->x, pos->y}, physicsInfo);
         replacement = collider.GetBody();
         try
         {
@@ -174,7 +177,7 @@ void Map::CreateNewColliders()
         physicsWorld->DestroyBody(mapBody);
     }
     mapBody = replacement;
-    world->GetComponent<RigidBody>(objectId).body = replacement;
+    Registry().get<RigidBody>(objectId).body = replacement;
     physTex->points = std::move(physPoints);
 }
 

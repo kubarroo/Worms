@@ -1,7 +1,6 @@
 #pragma once
 #include "Core/SceneContext.h"
 #include "ECS/ECS_Types.h"
-#include "ECS/World.h"
 #include "SDL3/SDL.h"
 #include <optional>
 #include <stdexcept>
@@ -37,19 +36,19 @@ public:
     EntityHandle GetHandle() const
     {
         const auto id = GetId();
-        const auto handle = world->GetHandle(id);
-        if (!handle)
+        auto& registry = Registry();
+        if (!registry.valid(id))
             throw std::logic_error("GameObject entity is no longer alive");
-        return *handle;
+        return {id, &registry};
     }
 
     virtual ~GameObject() = default;
 
 protected:
     const SceneContext& Context() const;
+    entt::registry& Registry() const { return Context().registry; }
     EntityId objectId = entt::null;
     bool hasEntity = false;
-    World* world = nullptr;
     SDL_Renderer* renderer = nullptr;
 
 private:

@@ -14,14 +14,11 @@ void GameObject::Initialise(const SceneContext& newContext)
     {
         throw std::logic_error("GameObject already has an entity");
     }
-    if (&newContext.registry != &newContext.world.Registry())
-        throw std::invalid_argument("Context uses different ECS registries");
     if (&newContext.contacts.Registry() != &newContext.registry)
         throw std::invalid_argument("Contact manager uses a different ECS registry");
-    const auto newId = newContext.world.CreateEntity();
+    const auto newId = newContext.registry.create();
     context.emplace(newContext);
     renderer = newContext.renderer;
-    world = &newContext.world;
     objectId = newId;
     hasEntity = true;
 }
@@ -32,10 +29,10 @@ void GameObject::CleanUp()
     {
         return;
     }
-    world->DestroyEntity(objectId);
+    auto& registry = Registry();
+    if (registry.valid(objectId)) registry.destroy(objectId);
     hasEntity = false;
     objectId = entt::null;
-    world = nullptr;
     renderer = nullptr;
     context.reset();
 }

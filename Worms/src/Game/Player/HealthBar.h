@@ -13,11 +13,11 @@ public:
     void TakeDamage(int amount);
     int getCurrentHp()
     {
-        if (!HasEntity()) throw std::logic_error("HealthBar has no entity");
-        return world->GetComponent<Health>(objectId).current;
+        return RequireHealth().current;
     }
 
 private:
+    Health& RequireHealth() const;
     EntityHandle parent;
     int initialHealth;
     // Both pointers borrow the team texture; WormTeam outlives its health bars.

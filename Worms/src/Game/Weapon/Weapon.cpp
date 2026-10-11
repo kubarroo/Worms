@@ -19,11 +19,11 @@ void Weapon::Initialise(const SceneContext& context)
     GameObject::Initialise(context);
     try
 	{
-		world->AddComponent<Position>( objectId, { 0, 0 } );
-		world->AddComponent<Rotation>( objectId, { 0 } );
-        world->AddComponent<RenderOrder>(objectId,
+		Registry().emplace<Position>( objectId, Position{ 0, 0 } );
+		Registry().emplace<Rotation>( objectId, Rotation{ 0 } );
+        Registry().emplace<RenderOrder>(objectId,
             NextRenderOrder(context.registry, RenderLayer::Weapons));
-		world->AddComponent<Sprite>( objectId );
+		Registry().emplace<Sprite>( objectId );
 		powerBar = context.resources.GetTexture("powerBar.png");
 		canShoot = true;
         observedInputInterruption = context.input.InterruptionCount();
@@ -48,18 +48,18 @@ void Weapon::CleanUp()
 std::optional<Position> Weapon::GetParentPosition()
 {
 	if (!HasEntity() || !parentId) return {};
-	if (!world->IsAlive(*parentId))
+	if (!IsValid(Registry(), *parentId))
 	{
 		ClearParent();
 		return {};
 	}
-	auto parentPosition = world->TryGetComponent<Position>(parentId->id);
+	auto parentPosition = Registry().try_get<Position>(parentId->id);
 	if ( !parentPosition )
 	{
 		ClearParent();
 		return {};
 	}
-	return parentPosition->get();
+	return *parentPosition;
 }
 
 void Weapon::Update()
@@ -77,8 +77,8 @@ void Weapon::Update()
 	auto parentPosition = GetParentPosition();
 	if (!parentPosition || !canShoot) return;
 
-	auto& pos = world->GetComponent<Position>( objectId );
-	auto& rot = world->GetComponent<Rotation>( objectId );
+	auto& pos = Registry().get<Position>( objectId );
+	auto& rot = Registry().get<Rotation>( objectId );
 	pos = *parentPosition;
 
 	rot.degree += Context().input.Vertical() * static_cast<float>(Time::deltaTime) * 100.f;
@@ -121,8 +121,8 @@ void Weapon::Update()
 void Weapon::Render()
 {
 	if (!GetParentPosition() || !powerBar) return;
-	auto& pos = world->GetComponent<Position>( objectId );
-	auto& rot = world->GetComponent<Rotation>( objectId );
+	auto& pos = Registry().get<Position>( objectId );
+	auto& rot = Registry().get<Rotation>( objectId );
 	auto size = Context().rendering.TextureSize(powerBar);
 
 	RenderRect slice(

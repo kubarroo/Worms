@@ -19,7 +19,7 @@ Projectile::Projectile( float posX, float posY, float vX, float vY ) : startPosX
 void Projectile::Update()
 {
 	if ( !HasEntity() || !collider ) return;
-	auto& pos = world->GetComponent<Position>( objectId );
+	auto& pos = Registry().get<Position>( objectId );
 	if ( createSensor ||
 		 pos.y < -15.f ||
 		 timer.Measure() > params.explosionOffset && params.explosionOffset != 0 )
@@ -29,7 +29,7 @@ void Projectile::Update()
         Context().objects.QueueAdd(std::make_unique<ParticleSystem>(
             "particle.png", params.explosionRadius * 3.f, pos.x, pos.y, 100));
 
-        world->GetComponent<RigidBody>(objectId).body->SetAwake(true);
+        Registry().get<RigidBody>(objectId).body->SetAwake(true);
         sensorInfo = {PhysicsTag::DESTRUCTION_FIELD, objectId, &Context().physics};
 		b2CircleShape shape;
 		shape.m_radius = params.explosionRadius;
@@ -73,12 +73,12 @@ void Projectile::Initialise(const SceneContext& context)
     try
     {
         timer.Reset();
-        world->AddComponent<Position>(objectId, {startPosX, startPosY});
-        world->AddComponent<RenderOrder>(objectId,
+        Registry().emplace<Position>(objectId, Position{startPosX, startPosY});
+        Registry().emplace<RenderOrder>(objectId,
             NextRenderOrder(context.registry, RenderLayer::Projectiles));
-        world->AddComponent<Sprite>(objectId, {texture});
-        world->AddComponent<Rotation>(objectId, {0});
-        auto& rigidBody = world->AddComponent<RigidBody>(objectId);
+        Registry().emplace<Sprite>(objectId, Sprite{texture});
+        Registry().emplace<Rotation>(objectId, Rotation{0});
+        auto& rigidBody = Registry().emplace<RigidBody>(objectId);
         physicsInfo = {PhysicsTag::BULLET, objectId, &context.physics};
 
         b2CircleShape shape;

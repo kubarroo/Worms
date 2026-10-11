@@ -6,7 +6,6 @@
 #include <entt/entity/registry.hpp>
 
 struct SDL_Renderer;
-class World;
 class b2World;
 class b2ColliderDraw;
 class Camera;
@@ -61,7 +60,6 @@ private:
     std::deque<std::unique_ptr<GameObject>> pendingAdds;
     std::deque<GameObject*> pendingRemovals;
     entt::registry registry;
-    std::unique_ptr<World> world;
     std::unique_ptr<b2World> physicsWorld;
     std::unique_ptr<ContactManager> contacts;
     std::unique_ptr<ColliderFactory> colliders;

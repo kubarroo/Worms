@@ -23,7 +23,7 @@ public:
         }
         if (newTarget.owner != &Context().registry)
             throw std::invalid_argument("Camera target belongs to another registry");
-        target = world->IsAlive(newTarget) ? std::optional{newTarget} : std::nullopt;
+        target = IsValid(Registry(), newTarget) ? std::optional{newTarget} : std::nullopt;
     }
     void ClearTarget()
     {
@@ -35,18 +35,18 @@ public:
         {
             return {};
         }
-        if (!world->IsAlive(*target))
+        if (!IsValid(Registry(), *target))
         {
             ClearTarget();
             return {};
         }
-        auto position = world->TryGetComponent<Position>(target->id);
+        auto position = Registry().try_get<Position>(target->id);
         if (!position)
         {
             ClearTarget();
             return {};
         }
-        return position->get();
+        return *position;
     };
 
 private:

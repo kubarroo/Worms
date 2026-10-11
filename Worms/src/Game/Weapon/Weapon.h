@@ -27,7 +27,7 @@ public:
     {
         if (HasEntity() && newParent.owner != &Context().registry)
             throw std::invalid_argument("Weapon parent belongs to another registry");
-        const auto newHandle = HasEntity() && world->IsAlive(newParent)
+        const auto newHandle = HasEntity() && IsValid(Registry(), newParent)
                                    ? std::optional{newParent} : std::nullopt;
         if (newHandle && parentId == newHandle) return;
         ClearParent();
@@ -44,7 +44,11 @@ public:
     }
     void SetTexture(SDL_Texture* texture)
     {
-        world->GetComponent<Sprite>(objectId).texture = texture;
+        if (!HasEntity()) throw std::logic_error("Weapon has no entity");
+        auto& registry = Registry();
+        auto* sprite = registry.valid(objectId) ? registry.try_get<Sprite>(objectId) : nullptr;
+        if (!sprite) throw std::logic_error("Weapon has no sprite component");
+        sprite->texture = texture;
     }
     void SetExplosionSound(Sound* sound)
     {

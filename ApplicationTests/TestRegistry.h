@@ -1,6 +1,19 @@
 #pragma once
 #include <entt/entity/registry.hpp>
 #include <stdexcept>
+#include "ECS/ECS_Types.h"
+#include <optional>
+
+inline std::size_t EntityCount(const entt::registry& registry)
+{
+    return registry.storage<entt::entity>()->free_list();
+}
+
+inline std::optional<EntityHandle> MakeHandle(const entt::registry& registry, entt::entity entity)
+{
+    if (!registry.valid(entity)) return {};
+    return EntityHandle{entity, &registry};
+}
 
 // Inject a failure after insertion, exercising cleanup of partially initialized objects.
 template <typename Component> class ScopedComponentFailure

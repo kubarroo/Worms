@@ -2,7 +2,6 @@
 #include "Core/GameObject.h"
 #include "Core/Physics/Collider.h"
 #include "Core/Utils.h"
-#include "ECS/World.h"
 #include "Game/Components.h"
 #include "Game/Tags.h"
 #include <SDL3/SDL.h>

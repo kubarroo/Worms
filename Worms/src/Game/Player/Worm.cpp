@@ -25,7 +25,7 @@ void Worm::Initialise(const SceneContext& context)
     try
     {
         jumpSound = &context.resources.GetSound("jump.wav");
-        auto& pos = world->AddComponent<Position>(objectId, Position{spawnPosition.x, spawnPosition.y});
+        auto& pos = Registry().emplace<Position>(objectId, Position{spawnPosition.x, spawnPosition.y});
 
         physicsInfo = {PhysicsTag::WORM, objectId, &context.physics};
 
@@ -38,13 +38,13 @@ void Worm::Initialise(const SceneContext& context)
                     healthBar->TakeDamage(40);
             });
 
-        groundedId = world->CreateEntity();
+        groundedId = Registry().create();
         hasGroundedEntity = true;
         groundedPhysicsInfo = {PhysicsTag::GROUNDED, groundedId, &context.physics};
 
-        world->AddComponent<RenderOrder>(objectId,
+        Registry().emplace<RenderOrder>(objectId,
             NextRenderOrder(context.registry, RenderLayer::Actors));
-        Sprite& spriteComponent = world->AddComponent<Sprite>(objectId);
+        Sprite& spriteComponent = Registry().emplace<Sprite>(objectId);
         spriteTexture = context.resources.GetTexture("worms.png");
         spriteComponent.texture = spriteTexture;
 
@@ -66,13 +66,13 @@ void Worm::Initialise(const SceneContext& context)
         Context().colliders.CreateTriggerFixture(collider->GetBody(), &groundShape,
                                                  groundedPhysicsInfo);
         groundedBeginSubscription = Context().contacts.AddEvent(
-            *world->GetHandle(groundedId), CollisionType::BEGIN, [&](b2Contact*) { grounded = true; });
+            EntityHandle{groundedId, &Registry()}, CollisionType::BEGIN, [&](b2Contact*) { grounded = true; });
         groundedEndSubscription = Context().contacts.AddEvent(
-            *world->GetHandle(groundedId), CollisionType::END, [&](b2Contact*) { grounded = false; });
+            EntityHandle{groundedId, &Registry()}, CollisionType::END, [&](b2Contact*) { grounded = false; });
 
         healthBar = std::make_unique<HealthBar>(GetHandle(), camera, 100, healthTexture);
         healthBar->Initialise(context);
-        world->AddComponent<RigidBody>(objectId, {collider->GetBody()});
+        Registry().emplace<RigidBody>(objectId, RigidBody{collider->GetBody()});
     }
     catch (...)
     {
@@ -87,11 +87,11 @@ void Worm::Update(std::vector<Worm*>& wormsToDelete)
     {
         return;
     }
-    auto& pos = world->GetComponent<Position>(objectId);
+    auto& pos = Registry().get<Position>(objectId);
 
     if (pos.y < -15.f)
         healthBar->TakeDamage(100);
-    auto& rb = world->GetComponent<RigidBody>(objectId);
+    auto& rb = Registry().get<RigidBody>(objectId);
     healthBar->Update();
 
     if (healthBar->getCurrentHp() <= 0)
@@ -118,7 +118,7 @@ void Worm::Jump()
     {
         return;
     }
-    auto& rb = world->GetComponent<RigidBody>(objectId);
+    auto& rb = Registry().get<RigidBody>(objectId);
     if (!IsGrounded() || !Context().input.Jump() || rb.body->GetLinearVelocity().y > 0.4)
     {
         return;
@@ -147,7 +147,7 @@ void Worm::CleanUp()
     }
     if (hasGroundedEntity)
     {
-        world->DestroyEntity(groundedId);
+        if (Registry().valid(groundedId)) Registry().destroy(groundedId);
         hasGroundedEntity = false;
         groundedId = entt::null;
     }

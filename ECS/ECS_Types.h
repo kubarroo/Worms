@@ -1,6 +1,7 @@
 #pragma once
 #include <entt/entity/entity.hpp>
 #include <entt/entity/fwd.hpp>
+#include <entt/entity/registry.hpp>
 
 using EntityId = entt::entity;
 
@@ -12,3 +13,8 @@ struct EntityHandle
     const entt::registry* owner = nullptr;
     bool operator==(const EntityHandle&) const = default;
 };
+
+inline bool IsValid(const entt::registry& registry, EntityHandle handle)
+{
+    return handle.owner == &registry && registry.valid(handle.id);
+}

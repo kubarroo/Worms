@@ -6,7 +6,6 @@
 #include "Core/Input.h"
 #include "Core/ResourceManager.h"
 #include "Core/Physics/b2ColliderDraw.h"
-#include "ECS/World.h"
 #include "Game/Components.h"
 #include "Game/RenderOrder.h"
 #include "Game/Map/Map.h"
@@ -105,11 +104,10 @@ void GameScene::Initialize()
     ownsRuntime = true;
     try
     {
-        world = std::make_unique<World>(registry);
         physicsWorld = std::make_unique<b2World>(b2Vec2(0, -9.811f));
         contacts = std::make_unique<ContactManager>(registry);
         colliders = std::make_unique<ColliderFactory>(*physicsWorld, *contacts);
-        context = std::make_unique<SceneContext>(renderer, *world, *physicsWorld, *this, *colliders,
+        context = std::make_unique<SceneContext>(renderer, registry, *physicsWorld, *this, *colliders,
                                                  *contacts, resources, rendering, audio, input);
         auto camera = std::make_unique<Camera>();
         auto cameraPtr = camera.get();
@@ -172,8 +170,6 @@ void GameScene::ValidateObject(const GameObject& object) const
         throw std::logic_error("Scene is not accepting objects");
     if (object.context && &object.context->objects != this)
         throw std::invalid_argument("Object belongs to another scene");
-    if (object.HasEntity() && object.world != world.get())
-        throw std::invalid_argument("Object belongs to another ECS world");
     if (object.context &&
         (&object.context->registry != &registry ||
          &object.context->physics != physicsWorld.get() || object.context->renderer != renderer ||
@@ -417,7 +413,6 @@ void GameScene::CleanUp() noexcept
     colliders.reset();
     physicsWorld.reset();
     contacts.reset();
-    world.reset();
     registry.clear();
     registry.ctx().erase<RenderSequence>();
 

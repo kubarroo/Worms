@@ -21,7 +21,7 @@ void ParticleSystem::CleanUp()
     }
     for (const auto particle : particles)
     {
-        world->DestroyEntity(particle);
+        if (Registry().valid(particle)) Registry().destroy(particle);
     }
     particles.clear();
     GameObject::CleanUp();
@@ -54,21 +54,20 @@ void ParticleSystem::Initialise(const SceneContext& context)
         particles.reserve(static_cast<std::size_t>(amountOfParticles));
         for (int i = 0; i < amountOfParticles; i++)
         {
-            EntityId particleId = world->CreateEntity();
+            EntityId particleId = Registry().create();
             particles.emplace_back(particleId);
             b2Vec2 vel = {rand() * 2.f / RAND_MAX - 1.f, rand() * 2.f / RAND_MAX - 1.f};
             vel *= 1.f / sqrt(vel.x * vel.x + vel.y * vel.y);
             vel *= 0.012f * rand() / RAND_MAX;
-            world->AddComponent<Particle>(particleId,
-                                          {&progress, nullptr, [](double x, double y)
+            Registry().emplace<Particle>(particleId, Particle{&progress, nullptr, [](double x, double y)
                                            { return std::pair<float, float>{x * 0.999, y * 0.999}; },
                                            [](double x) { return x * 0.98; }});
-            world->AddComponent<Position>(particleId, {startPosX, startPosY});
-            world->AddComponent<Motion>(particleId, {vel.x, vel.y});
-            world->AddComponent<RenderOrder>(particleId,
+            Registry().emplace<Position>(particleId, Position{startPosX, startPosY});
+            Registry().emplace<Motion>(particleId, Motion{vel.x, vel.y});
+            Registry().emplace<RenderOrder>(particleId,
                 NextRenderOrder(context.registry, RenderLayer::Effects));
-            world->AddComponent<Sprite>(particleId, {texture});
-            world->AddComponent<Scale>(particleId, {startScale * rand() / RAND_MAX});
+            Registry().emplace<Sprite>(particleId, Sprite{texture});
+            Registry().emplace<Scale>(particleId, Scale{startScale * rand() / RAND_MAX});
         }
     }
     catch (...)

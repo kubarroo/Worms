@@ -32,7 +32,7 @@ void Camera::Initialise(const SceneContext& context)
     GameObject::Initialise(context);
     try
     {
-        world->AddComponent<Position>(objectId, {2, -1});
+        Registry().emplace<Position>(objectId, Position{2, -1});
         focusPoint = std::make_unique<FocusPoint>();
         focusPoint->Initialise(context);
         timer.Reset();
@@ -83,7 +83,10 @@ Position& Camera::GetPosition() const
     {
         throw std::logic_error("Camera has no entity");
     }
-    return world->GetComponent<Position>(objectId);
+    auto& registry = Registry();
+    auto* position = registry.valid(objectId) ? registry.try_get<Position>(objectId) : nullptr;
+    if (!position) throw std::logic_error("Camera has no position component");
+    return *position;
 }
 
 void Camera::CleanUp()

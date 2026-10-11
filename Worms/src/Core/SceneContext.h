@@ -1,9 +1,8 @@
 #pragma once
 #include <memory>
-#include "ECS/World.h"
+#include <entt/entity/registry.hpp>
 
 struct SDL_Renderer;
-class World;
 class b2World;
 class GameObject;
 class ColliderFactory;
@@ -27,7 +26,7 @@ public:
 struct SceneContext
 {
     SDL_Renderer* renderer;
-    World& world;
+    entt::registry& registry;
     b2World& physics;
     ObjectCommands& objects;
     ColliderFactory& colliders;
@@ -36,5 +35,4 @@ struct SceneContext
     Renderer2D& rendering;
     Audio& audio;
     Input& input;
-    entt::registry& registry = world.Registry();
 };

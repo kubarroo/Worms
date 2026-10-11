@@ -118,9 +118,15 @@ Selecting the Debug preset again without this override re-enables tests.
 See docs/Worms_documentation.pdf for the original project documentation.
 It may not reflect subsequent architecture changes.
 
+## Entity Lifetime
+
+Gameplay uses the scene-owned EnTT registry directly. Entity handles validate
+both the owning registry and the entity version. Objects release physics bodies
+and collision subscriptions through their cleanup process before destroying
+their entities; removing an ECS component does not release a Box2D body.
+
 ## Planned Changes
 
-- Complete migration of gameplay access from the temporary World adapter to EnTT
 - Improve resource ownership and object lifetimes
 - Refactor scene management and gameplay systems
 

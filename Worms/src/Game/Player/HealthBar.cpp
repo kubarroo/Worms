@@ -1,5 +1,4 @@
 #include "Game/Player/HealthBar.h"
-#include "ECS/World.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Core/Renderer2D.h"
 #include <algorithm>
@@ -11,16 +10,16 @@ HealthBar::HealthBar(EntityHandle parent, const Camera& camera, int health, SDL_
 
 void HealthBar::Initialise(const SceneContext& context)
 {
-    if (!context.world.IsAlive(parent))
+    if (!IsValid(context.registry, parent))
         throw std::invalid_argument("Health bar requires a live parent in its registry");
     GameObject::Initialise(context);
     try
     {
         SDL_CHECK(texture);
 
-        world->AddComponent<Position>(objectId, {0, 0});
-        world->AddComponent<Health>(objectId, {initialHealth, initialHealth});
-        world->AddComponent<Follow>(objectId, {parent, 0.0, 0.3});
+        Registry().emplace<Position>(objectId, Position{0, 0});
+        Registry().emplace<Health>(objectId, Health{initialHealth, initialHealth});
+        Registry().emplace<Follow>(objectId, Follow{parent, 0.0, 0.3});
         healthBar = texture;
         SDL_CHECK(healthBar);
     }
@@ -37,8 +36,8 @@ void HealthBar::Render()
     {
         return;
     }
-    auto& pos = world->GetComponent<Position>(objectId);
-    auto& hp = world->GetComponent<Health>(objectId);
+    auto& pos = Registry().get<Position>(objectId);
+    auto& hp = Registry().get<Health>(objectId);
     auto size = Context().rendering.TextureSize(healthBar);
 
     double hpPrc = hp.max > 0 ? std::clamp(static_cast<double>(hp.current) / hp.max, 0.0, 1.0) : 0.0;
@@ -63,5 +62,14 @@ void HealthBar::TakeDamage(int amount)
     {
         return;
     }
-    world->GetComponent<Health>(objectId).current -= amount;
+    RequireHealth().current -= amount;
+}
+
+Health& HealthBar::RequireHealth() const
+{
+    if (!HasEntity()) throw std::logic_error("HealthBar has no entity");
+    auto& registry = Registry();
+    auto* health = registry.valid(objectId) ? registry.try_get<Health>(objectId) : nullptr;
+    if (!health) throw std::logic_error("HealthBar has no health component");
+    return *health;
 }
