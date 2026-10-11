@@ -1,4 +1,6 @@
 #include "Core/Initialization/App.h"
+#include "Core/ResourceManager.h"
+#include "TestPlatform.h"
 #include "Core/ParticleSystem.h"
 #include "Core/Input.h"
 #include "Core/Time.h"
@@ -6,7 +8,7 @@
 #include "Core/Physics/ContactManager.h"
 #include "Game/Tags.h"
 #include "Game/Weapon/WeaponImpl.h"
-#include <SDL_mixer.h>
+#include <SDL3_mixer/SDL_mixer.h>
 #include <gtest/gtest.h>
 #include <memory>
 #include <optional>
@@ -130,34 +132,38 @@ private:
 class TestApp : public App
 {
 public:
+    void InitWindow(const std::string& title, int width, int height) override
+    {
+        ConfigureTestDrivers();
+        App::InitWindow(title, width, height);
+    }
     bool HasWindow() const { return window != nullptr; }
     bool HasRenderer() const { return renderer != nullptr; }
+    SDL_WindowID WindowId() const { return SDL_GetWindowID(window.get()); }
     using App::StopAudioPlayback;
+    using App::AudioOutput;
+    using App::Resources;
 };
 
 TEST(CleanupSafety, StoppingPlaybackKeepsDeviceAndPlatformAliveAndAllowsRestart)
 {
-    ScopedHint video(SDL_HINT_VIDEODRIVER, "dummy");
-    ScopedHint audio(SDL_HINT_AUDIODRIVER, "dummy");
+    ScopedHint video(SDL_HINT_VIDEO_DRIVER, "dummy");
+    ScopedHint audio(SDL_HINT_AUDIO_DRIVER, "dummy");
     ScopedHint renderer(SDL_HINT_RENDER_DRIVER, "software");
     TestApp app;
     ASSERT_NO_THROW(app.InitWindow("Test", 32, 32));
-    std::vector<Uint8> samples(44100, 0);
-    std::unique_ptr<Mix_Chunk, decltype(&Mix_FreeChunk)> sound(
-        Mix_QuickLoad_RAW(samples.data(), static_cast<Uint32>(samples.size())), Mix_FreeChunk);
-    ASSERT_NE(sound, nullptr);
-    ASSERT_GE(Mix_PlayChannel(-1, sound.get(), -1), 0);
-    EXPECT_GT(Mix_Playing(-1), 0);
+    auto& sound = app.Resources().GetSound("jump.wav");
+    ASSERT_GE(app.AudioOutput().Play(sound, -1), 0);
+    EXPECT_GT(app.AudioOutput().PlayingSounds(), 0);
     app.StopAudioPlayback();
     app.StopAudioPlayback();
-    EXPECT_EQ(Mix_Playing(-1), 0);
-    EXPECT_GT(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(app.AudioOutput().PlayingSounds(), 0);
+    EXPECT_TRUE(app.AudioOutput().IsOpen());
     EXPECT_TRUE(app.HasWindow());
     EXPECT_TRUE(app.HasRenderer());
     EXPECT_TRUE(app.IsRunning());
-    sound.reset();
     app.Clean();
-    EXPECT_EQ(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+    EXPECT_FALSE(app.AudioOutput().IsOpen());
     ASSERT_NO_THROW(app.InitWindow("Restart", 32, 32));
     EXPECT_TRUE(app.HasRenderer());
     app.Clean();
@@ -175,10 +181,33 @@ TEST(CleanupSafety, UninitializedAppCanBeCleanedTwice)
     EXPECT_FALSE(app.HasRenderer());
 }
 
+TEST(CleanupSafety, WindowCloseAndQuitStopTheLoopDuringPlayback)
+{
+    ScopedHint video(SDL_HINT_VIDEO_DRIVER, "dummy");
+    ScopedHint audio(SDL_HINT_AUDIO_DRIVER, "dummy");
+    ScopedHint renderer(SDL_HINT_RENDER_DRIVER, "software");
+    for (auto type : {SDL_EVENT_WINDOW_CLOSE_REQUESTED, SDL_EVENT_QUIT})
+    {
+        TestApp app;
+        ASSERT_NO_THROW(app.InitWindow("Closing", 32, 32));
+        app.AudioOutput().Play(app.Resources().GetSound("jump.wav"), -1);
+        SDL_Event event{};
+        event.type = type;
+        event.window.windowID = app.WindowId();
+        ASSERT_TRUE(SDL_PushEvent(&event));
+        app.HandleEvents();
+        EXPECT_FALSE(app.IsRunning());
+        app.Clean();
+        EXPECT_FALSE(app.AudioOutput().IsOpen());
+        EXPECT_EQ(app.AudioOutput().PlayingSounds(), 0);
+        EXPECT_EQ(SDL_WasInit(0), 0u);
+    }
+}
+
 TEST(CleanupSafety, EventHandlingOutsidePlatformLifetimeIsANoOp)
 {
-    ScopedHint video(SDL_HINT_VIDEODRIVER, "dummy");
-    ScopedHint audio(SDL_HINT_AUDIODRIVER, "dummy");
+    ScopedHint video(SDL_HINT_VIDEO_DRIVER, "dummy");
+    ScopedHint audio(SDL_HINT_AUDIO_DRIVER, "dummy");
     ScopedHint renderer(SDL_HINT_RENDER_DRIVER, "software");
     TestApp app;
     EXPECT_NO_THROW(app.HandleEvents());
@@ -190,9 +219,45 @@ TEST(CleanupSafety, EventHandlingOutsidePlatformLifetimeIsANoOp)
     EXPECT_EQ(SDL_WasInit(0), 0u);
 }
 
+TEST(CleanupSafety, MinimizedWindowSkipsRenderingAndRestoresAfterRestart)
+{
+    TestApp app;
+    EXPECT_FALSE(app.ShouldRenderFrame());
+    EXPECT_NO_THROW(app.FinishFrame(0, false));
+    ASSERT_NO_THROW(app.InitWindow("Frame pacing", 32, 32));
+    app.HandleEvents();
+    ASSERT_TRUE(app.ShouldRenderFrame());
+    auto send = [&](Uint32 type, SDL_WindowID id)
+    {
+        SDL_Event event{};
+        event.type = type;
+        event.window.windowID = id;
+        ASSERT_TRUE(SDL_PushEvent(&event));
+        app.HandleEvents();
+    };
+    send(SDL_EVENT_WINDOW_MINIMIZED, app.WindowId() + 1);
+    EXPECT_TRUE(app.ShouldRenderFrame());
+    send(SDL_EVENT_WINDOW_MINIMIZED, app.WindowId());
+    EXPECT_FALSE(app.ShouldRenderFrame());
+    EXPECT_TRUE(app.IsRunning());
+    send(SDL_EVENT_WINDOW_RESTORED, app.WindowId() + 1);
+    EXPECT_FALSE(app.ShouldRenderFrame());
+    send(SDL_EVENT_WINDOW_RESTORED, app.WindowId());
+    EXPECT_TRUE(app.ShouldRenderFrame());
+    send(SDL_EVENT_WINDOW_MINIMIZED, app.WindowId());
+    send(SDL_EVENT_WINDOW_MAXIMIZED, app.WindowId());
+    EXPECT_TRUE(app.ShouldRenderFrame());
+    send(SDL_EVENT_WINDOW_MINIMIZED, app.WindowId());
+    app.Clean();
+    EXPECT_FALSE(app.ShouldRenderFrame());
+    EXPECT_NO_THROW(app.FinishFrame(0, false));
+    ASSERT_NO_THROW(app.InitWindow("Restart", 32, 32));
+    EXPECT_TRUE(app.ShouldRenderFrame());
+}
+
 TEST(CleanupSafety, AppCanBeCleanedAfterVideoInitializationFails)
 {
-    ScopedHint videoDriver(SDL_HINT_VIDEODRIVER, "worms-nonexistent-driver");
+    ScopedHint videoDriver(SDL_HINT_VIDEO_DRIVER, "worms-nonexistent-driver");
     TestApp app;
     EXPECT_THROW(app.InitWindow("Test", 32, 32), SDL_Exception);
     EXPECT_NO_THROW(app.HandleEvents());
@@ -205,7 +270,7 @@ TEST(CleanupSafety, AppCanBeCleanedAfterVideoInitializationFails)
 
 TEST(CleanupSafety, AppCanBeCleanedAfterRendererInitializationFails)
 {
-    ScopedHint videoDriver(SDL_HINT_VIDEODRIVER, "dummy");
+    ScopedHint videoDriver(SDL_HINT_VIDEO_DRIVER, "dummy");
     ScopedHint rendererDriver(SDL_HINT_RENDER_DRIVER, "worms-nonexistent-renderer");
     TestApp app;
     EXPECT_THROW(app.InitWindow("Test", 32, 32), SDL_Exception);
@@ -221,8 +286,8 @@ TEST(CleanupSafety, AppCanBeCleanedAfterRendererInitializationFails)
 
 TEST(CleanupSafety, FailedPlatformInitializationCanBeRetriedWithoutExplicitCleanup)
 {
-    ScopedHint video(SDL_HINT_VIDEODRIVER, "dummy");
-    ScopedHint audio(SDL_HINT_AUDIODRIVER, "dummy");
+    ScopedHint video(SDL_HINT_VIDEO_DRIVER, "dummy");
+    ScopedHint audio(SDL_HINT_AUDIO_DRIVER, "dummy");
     TestApp app;
     {
         ScopedHint renderer(SDL_HINT_RENDER_DRIVER, "worms-nonexistent-renderer");
@@ -230,7 +295,7 @@ TEST(CleanupSafety, FailedPlatformInitializationCanBeRetriedWithoutExplicitClean
     }
     ScopedHint renderer(SDL_HINT_RENDER_DRIVER, "software");
     {
-        ScopedHint badAudio(SDL_HINT_AUDIODRIVER, "worms-nonexistent-driver");
+        ScopedHint badAudio(SDL_HINT_AUDIO_DRIVER, "worms-nonexistent-driver");
         EXPECT_THROW(app.InitWindow("Test", 32, 32), SDL_Exception);
         EXPECT_FALSE(app.HasWindow());
         EXPECT_FALSE(app.HasRenderer());
@@ -246,8 +311,8 @@ TEST(CleanupSafety, FailedPlatformInitializationCanBeRetriedWithoutExplicitClean
 
 TEST(CleanupSafety, AppDestructorReleasesPlatformWithoutExplicitCleanup)
 {
-    ScopedHint video(SDL_HINT_VIDEODRIVER, "dummy");
-    ScopedHint audio(SDL_HINT_AUDIODRIVER, "dummy");
+    ScopedHint video(SDL_HINT_VIDEO_DRIVER, "dummy");
+    ScopedHint audio(SDL_HINT_AUDIO_DRIVER, "dummy");
     ScopedHint renderer(SDL_HINT_RENDER_DRIVER, "software");
     {
         App app;
@@ -255,7 +320,7 @@ TEST(CleanupSafety, AppDestructorReleasesPlatformWithoutExplicitCleanup)
     }
     EXPECT_EQ(SDL_WasInit(0), 0u);
     EXPECT_EQ(ImGui::GetCurrentContext(), nullptr);
-    EXPECT_EQ(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(SDL_WasInit(SDL_INIT_AUDIO), 0u);
 }
 
 TEST(CleanupSafety, InputResetClearsAxesHeldActionsAndPendingWeaponChange)
@@ -264,12 +329,12 @@ TEST(CleanupSafety, InputResetClearsAxesHeldActionsAndPendingWeaponChange)
     SdlInputAdapter adapter(input);
     input.Reset();
     SDL_Event event{};
-    event.type = SDL_KEYDOWN;
+    event.type = SDL_EVENT_KEY_DOWN;
     for (auto key : {SDL_SCANCODE_D, SDL_SCANCODE_W, SDL_SCANCODE_UP,
                      SDL_SCANCODE_RIGHT, SDL_SCANCODE_SPACE, SDL_SCANCODE_LSHIFT,
                      SDL_SCANCODE_E})
     {
-        event.key.keysym.scancode = key;
+        event.key.scancode = key;
         adapter.ProcessEvent(event, false);
     }
     EXPECT_TRUE(input.Jump());
@@ -290,7 +355,7 @@ TEST(CleanupSafety, InputResetClearsAxesHeldActionsAndPendingWeaponChange)
 
 TEST(CleanupSafety, FrameClockStartsAtZeroAfterReset)
 {
-    ASSERT_EQ(SDL_Init(SDL_INIT_TIMER), 0);
+    ASSERT_EQ(SDL_Init(0), true);
     Time::ResetFrameClock();
     Time::UpdateFrameTime();
     EXPECT_DOUBLE_EQ(Time::deltaTime, 0.0);

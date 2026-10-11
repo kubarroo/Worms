@@ -1,3 +1,4 @@
+#include <numbers>
 #include "Core/Physics/b2ColliderDraw.h"
 #include <vector>
 #include <array>
@@ -41,9 +42,9 @@ void b2ColliderDraw::DrawSolidCircle(const b2Vec2& center, float radius, const b
     for (int i = 0; i <= RES; i++)
     {
         RenderPoint pixelPoint = {static_cast<int>((center.x - camera.X()) * 100 +
-                                                 radius * 100 * cos(i * 2.f * M_PI / RES)),
+                                                 radius * 100 * cos(i * 2.f * std::numbers::pi / RES)),
                                 static_cast<int>((center.y - camera.Y()) * 100 +
-                                                 radius * 100 * sin(i * 2.f * M_PI / RES))};
+                                                 radius * 100 * sin(i * 2.f * std::numbers::pi / RES))};
         RenderPoint screenPoint(SCREEN_WIDTH / 2 + (pixelPoint.x),
                               SCREEN_HEIGHT / 2 - (pixelPoint.y));
         points[i] = screenPoint;

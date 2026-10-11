@@ -7,10 +7,14 @@ std::optional<PhysicTexture> IMG_LoadPhysicTexture(SDL_Renderer* renderer, const
     Sdl::SurfacePtr surface(IMG_Load(file));
     if (surface)
     {
+        // Terrain algorithms require alpha in the high byte of each packed pixel.
+        surface.reset(SDL_ConvertSurface(surface.get(), SDL_PIXELFORMAT_ARGB8888));
+        SDL_CHECK(surface.get());
         std::vector<std::vector<b2Vec2>> physPoints;
         {
             Sdl::SurfaceLock lock(surface.get());
-            auto points = MarchingSquares((Uint32*)surface->pixels, surface->w, surface->h, 64);
+            auto points = MarchingSquares((Uint32*)surface->pixels, surface->w, surface->h, 64,
+                                           surface->pitch / sizeof(Uint32));
             for (int i = 0; i < points.size(); i++)
             {
                 physPoints.push_back({});
@@ -25,27 +29,25 @@ std::optional<PhysicTexture> IMG_LoadPhysicTexture(SDL_Renderer* renderer, const
     return {};
 }
 
-std::vector<std::vector<SDL_Point>> MarchingSquares(Uint32* org_pixels, int w, int h, int threshold)
+std::vector<std::vector<SDL_Point>> MarchingSquares(Uint32* org_pixels, int w, int h, int threshold,
+                                                  int pitchPixels)
 {
     std::vector<std::vector<SDL_Point>> shapes{};
-    Sdl::SurfacePtr bitmap(
-        SDL_CreateRGBSurfaceWithFormat(0, w + 1, h + 1, 1, SDL_PIXELFORMAT_INDEX8));
-    SDL_CHECK(bitmap.get());
-
-    Sdl::SurfaceLock lock(bitmap.get());
+    std::vector<uint8_t> bitmap(static_cast<std::size_t>(w + 1) * (h + 1), 0);
+    if (pitchPixels == 0) pitchPixels = w;
 
     // First and last column and row should be 0
-    uint8_t* bitmap_pixels = (uint8_t*)bitmap->pixels;
+    uint8_t* bitmap_pixels = bitmap.data();
     for (int y = 0; y < h; y++)
     {
         for (int x = 0; x < w; x++)
         {
-            if ((org_pixels[x + y * w] & 0xFF00000) != 0x00000000)
+            if ((org_pixels[x + y * pitchPixels] & 0xFF000000) != 0)
             {
-                bitmap_pixels[x + y * bitmap->w]++;
-                bitmap_pixels[x + 1 + y * bitmap->w] += 2;
-                bitmap_pixels[x + 1 + (y + 1) * bitmap->w] += 4;
-                bitmap_pixels[x + (y + 1) * bitmap->w] += 8;
+                bitmap_pixels[x + y * (w + 1)]++;
+                bitmap_pixels[x + 1 + y * (w + 1)] += 2;
+                bitmap_pixels[x + 1 + (y + 1) * (w + 1)] += 4;
+                bitmap_pixels[x + (y + 1) * (w + 1)] += 8;
             }
         }
     }

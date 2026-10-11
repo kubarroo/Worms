@@ -9,4 +9,4 @@ target_include_directories(worms_ecs PUBLIC
     "${PROJECT_SOURCE_DIR}"
 )
 
-target_link_libraries(worms_ecs PUBLIC SDL2::SDL2)
+target_link_libraries(worms_ecs PUBLIC SDL3::SDL3)

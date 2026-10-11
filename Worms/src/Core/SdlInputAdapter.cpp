@@ -1,5 +1,5 @@
 #include "SdlInputAdapter.h"
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <optional>
 
 namespace
@@ -44,20 +44,17 @@ void SdlInputAdapter::BeginFrame(bool keyboardCaptured) noexcept
 }
 void SdlInputAdapter::ProcessEvent(const SDL_Event& event, bool keyboardCaptured) noexcept
 {
-    if (event.type == SDL_WINDOWEVENT)
-    {
-        if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
-            focused = false;
-        if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED)
-            focused = true;
-    }
+    if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
+        focused = false;
+    if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED)
+        focused = true;
     input.SetEnabled(focused && !keyboardCaptured);
-    if (event.type != SDL_KEYDOWN && event.type != SDL_KEYUP)
+    if (event.type != SDL_EVENT_KEY_DOWN && event.type != SDL_EVENT_KEY_UP)
         return;
-    if (event.type == SDL_KEYDOWN && event.key.repeat)
+    if (event.type == SDL_EVENT_KEY_DOWN && event.key.repeat)
         return;
-    if (const auto action = MapKey(event.key.keysym.scancode))
-        input.SetAction(*action, event.type == SDL_KEYDOWN);
+    if (const auto action = MapKey(event.key.scancode))
+        input.SetAction(*action, event.type == SDL_EVENT_KEY_DOWN);
 }
 void SdlInputAdapter::Reset() noexcept
 {

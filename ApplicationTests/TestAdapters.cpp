@@ -3,7 +3,8 @@
 #include "Core/Renderer2D.h"
 #include "Core/SDLHandles.h"
 #include "Core/SdlInputAdapter.h"
-#include <SDL2/SDL.h>
+#include "Core/Time.h"
+#include <SDL3/SDL.h>
 #include <gtest/gtest.h>
 #include <stdexcept>
 
@@ -12,16 +13,15 @@ namespace
 SDL_Event Key(SDL_Scancode code, bool down, bool repeat = false)
 {
     SDL_Event event{};
-    event.type = down ? SDL_KEYDOWN : SDL_KEYUP;
-    event.key.keysym.scancode = code;
+    event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+    event.key.scancode = code;
     event.key.repeat = repeat;
     return event;
 }
 SDL_Event Focus(bool gained)
 {
     SDL_Event event{};
-    event.type = SDL_WINDOWEVENT;
-    event.window.event = gained ? SDL_WINDOWEVENT_FOCUS_GAINED : SDL_WINDOWEVENT_FOCUS_LOST;
+    event.type = gained ? SDL_EVENT_WINDOW_FOCUS_GAINED : SDL_EVENT_WINDOW_FOCUS_LOST;
     return event;
 }
 } // namespace
@@ -134,16 +134,16 @@ TEST(InputActions, InterruptionCountSurvivesFramesAndReset)
 
 TEST(RenderAdapter, DrawsSlicesRotationAndLinesWithoutChangingTextureState)
 {
-    Sdl::SurfacePtr canvas(SDL_CreateRGBSurfaceWithFormat(0, 16, 16, 32, SDL_PIXELFORMAT_RGBA32));
+    Sdl::SurfacePtr canvas(SDL_CreateSurface(16, 16, SDL_PIXELFORMAT_RGBA32));
     ASSERT_NE(canvas, nullptr);
     Sdl::RendererPtr native(SDL_CreateSoftwareRenderer(canvas.get()));
     ASSERT_NE(native, nullptr);
     Renderer2D renderer(native.get());
-    Sdl::SurfacePtr source(SDL_CreateRGBSurfaceWithFormat(0, 2, 1, 32, SDL_PIXELFORMAT_RGBA32));
+    Sdl::SurfacePtr source(SDL_CreateSurface(2, 1, SDL_PIXELFORMAT_RGBA32));
     ASSERT_NE(source, nullptr);
     SDL_Rect left{0, 0, 1, 1}, right{1, 0, 1, 1};
-    ASSERT_EQ(SDL_FillRect(source.get(), &left, SDL_MapRGBA(source->format, 255, 0, 0, 255)), 0);
-    ASSERT_EQ(SDL_FillRect(source.get(), &right, SDL_MapRGBA(source->format, 0, 255, 0, 255)), 0);
+    ASSERT_EQ(SDL_FillSurfaceRect(source.get(), &left, SDL_MapSurfaceRGBA(source.get(), 255, 0, 0, 255)), true);
+    ASSERT_EQ(SDL_FillSurfaceRect(source.get(), &right, SDL_MapSurfaceRGBA(source.get(), 0, 255, 0, 255)), true);
     Sdl::TexturePtr texture(SDL_CreateTextureFromSurface(native.get(), source.get()));
     ASSERT_NE(texture, nullptr);
     renderer.Clear({0, 0, 0, 255});
@@ -158,7 +158,7 @@ TEST(RenderAdapter, DrawsSlicesRotationAndLinesWithoutChangingTextureState)
         Uint8 r, g, b, a;
         const auto* row = reinterpret_cast<const Uint32*>(
             static_cast<const Uint8*>(canvas->pixels) + y * canvas->pitch);
-        SDL_GetRGBA(row[x], canvas->format, &r, &g, &b, &a);
+        SDL_GetRGBA(row[x], SDL_GetPixelFormatDetails(canvas->format), nullptr, &r, &g, &b, &a);
         return RenderColor{r, g, b, a};
     };
     EXPECT_EQ(pixel(1, 1).g, 255);
@@ -167,8 +167,8 @@ TEST(RenderAdapter, DrawsSlicesRotationAndLinesWithoutChangingTextureState)
     EXPECT_EQ(pixel(8, 8).g, 255);
     EXPECT_EQ(pixel(11, 8).r, 255);
     Uint8 r, g, b, a;
-    ASSERT_EQ(SDL_GetTextureColorMod(texture.get(), &r, &g, &b), 0);
-    ASSERT_EQ(SDL_GetTextureAlphaMod(texture.get(), &a), 0);
+    ASSERT_EQ(SDL_GetTextureColorMod(texture.get(), &r, &g, &b), true);
+    ASSERT_EQ(SDL_GetTextureAlphaMod(texture.get(), &a), true);
     EXPECT_EQ(r, 255);
     EXPECT_EQ(g, 255);
     EXPECT_EQ(b, 255);
@@ -188,4 +188,21 @@ TEST(AudioAdapter, StoppingWithoutAnOpenDeviceIsSafe)
     Audio audio;
     EXPECT_NO_THROW(audio.StopAll());
     EXPECT_NO_THROW(audio.StopAll());
+}
+
+TEST(FramePacing, FallbackSubtractsFrameWorkAndNeverUnderflows)
+{
+    constexpr Uint64 budget = SDL_NS_PER_SECOND / 60;
+    EXPECT_EQ(Time::FrameDelayNS(0, false, true), budget);
+    EXPECT_EQ(Time::FrameDelayNS(5000000, false, true), budget - 5000000);
+    EXPECT_EQ(Time::FrameDelayNS(budget, false, true), 0u);
+    EXPECT_EQ(Time::FrameDelayNS(SDL_NS_PER_SECOND, false, true), 0u);
+}
+
+TEST(FramePacing, VSyncOnlyReplacesLimiterWhenFrameWasPresented)
+{
+    constexpr Uint64 budget = SDL_NS_PER_SECOND / 60;
+    EXPECT_EQ(Time::FrameDelayNS(0, true, true), 0u);
+    EXPECT_EQ(Time::FrameDelayNS(5000000, true, false), budget - 5000000);
+    EXPECT_EQ(Time::FrameDelayNS(SDL_NS_PER_SECOND, true, false), 0u);
 }

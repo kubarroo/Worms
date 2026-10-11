@@ -1,5 +1,5 @@
 #pragma once
-#include <SDL2/SDL.h> /* macOS- and GNU/Linux-specific */
+#include <SDL3/SDL.h> /* macOS- and GNU/Linux-specific */
 #include <imgui.h>
 #include <string>
 #include "Core/SDLHandles.h"
@@ -25,6 +25,8 @@ public:
     virtual void Render();
     void PostRender();
     void PreRender();
+    bool ShouldRenderFrame() const noexcept;
+    void FinishFrame(Uint64 startNS, bool presented) const noexcept;
     virtual void Clean() noexcept;
     // Configuration for the next platform initialization; never changes a live cache.
     void SetAssetRoot(std::filesystem::path root);
@@ -64,4 +66,8 @@ private:
 
     bool toggleColliders = false;
     bool isRunning = false;
+    bool vsyncEnabled = false;
+    bool minimized = false;
+    int logicalWidth = 0;
+    int logicalHeight = 0;
 };

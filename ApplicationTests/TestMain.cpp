@@ -2,7 +2,8 @@
 #include <cstdlib>
 #include <iostream>
 #define SDL_MAIN_HANDLED
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
 
 #if defined(_MSC_VER) && defined(_DEBUG)
 #include <crtdbg.h>
@@ -51,9 +52,8 @@ int main(int argc, char** argv)
         std::cerr << "A test left SDL subsystems initialized.\n";
         result = 1;
     }
-    // Timer/error APIs can allocate SDL state without initializing its main-thread lifecycle.
-    // Starting the timer subsystem enables SDL_Quit to release that state, including TLS.
-    if (SDL_Init(SDL_INIT_TIMER) != 0)
+    // SDL3 initializes timers internally; a zero-flags init enables final TLS cleanup.
+    if (!SDL_Init(0))
     {
         std::cerr << "Final SDL runtime initialization failed: " << SDL_GetError() << '\n';
         result = 1;

@@ -36,6 +36,7 @@ public:
     void DrawLine(RenderPoint first, RenderPoint second, RenderColor color) const;
     void Clear(RenderColor color) const;
     void Present() const;
+    // Both dimensions zero disable logical presentation for window-space overlays.
     void SetLogicalSize(int width, int height) const;
     void SetScale(float x, float y) const;
 

@@ -5,6 +5,7 @@
 #include "Core/Time.h"
 #include "Core/ResourceManager.h"
 #include "ExceptionHandling/SDL_Exception.h"
+#include "TestPlatform.h"
 #include "Game/Game.h"
 #include "Game/GameScene.h"
 #include "Game/Map/Map.h"
@@ -12,7 +13,7 @@
 #include "Game/Player/WormTeam.h"
 #include "Game/Weapon/Projectile.h"
 #include "Game/Weapon/WeaponManager.h"
-#include <SDL_mixer.h>
+#include <SDL3_mixer/SDL_mixer.h>
 #include <box2d/b2_circle_shape.h>
 #include <box2d/b2_chain_shape.h>
 #include <box2d/b2_contact_manager.h>
@@ -263,7 +264,7 @@ std::size_t CountOpaquePixels(SDL_Surface* surface)
             const auto* row = reinterpret_cast<const Uint32*>(
                 static_cast<const Uint8*>(surface->pixels) + y * surface->pitch);
             Uint8 r, g, b, a;
-            SDL_GetRGBA(row[x], surface->format, &r, &g, &b, &a);
+            SDL_GetRGBA(row[x], SDL_GetPixelFormatDetails(surface->format), nullptr, &r, &g, &b, &a);
             if (a) ++count;
         }
     return count;
@@ -273,7 +274,7 @@ std::vector<Uint8> SnapshotPixels(SDL_Surface* surface)
 {
     Sdl::SurfaceLock lock(surface);
     std::vector<Uint8> pixels;
-    const auto rowSize = surface->w * surface->format->BytesPerPixel;
+    const auto rowSize = surface->w * SDL_BYTESPERPIXEL(surface->format);
     pixels.reserve(static_cast<std::size_t>(rowSize) * surface->h);
     for (int y = 0; y < surface->h; ++y)
     {
@@ -308,7 +309,7 @@ SDL_Point FirstOpaquePixel(SDL_Surface* surface)
             const auto* row = reinterpret_cast<const Uint32*>(
                 static_cast<const Uint8*>(surface->pixels) + y * surface->pitch);
             Uint8 r, g, b, a;
-            SDL_GetRGBA(row[x], surface->format, &r, &g, &b, &a);
+            SDL_GetRGBA(row[x], SDL_GetPixelFormatDetails(surface->format), nullptr, &r, &g, &b, &a);
             if (a) return {x, y};
         }
     return {-1, -1};
@@ -337,6 +338,11 @@ private:
 class InspectableGame : public Game
 {
 public:
+    void InitTestWindow(const std::string& title, int width, int height)
+    {
+        ConfigureTestDrivers();
+        Game::InitWindow(title, width, height);
+    }
     using App::Graphics;
     using App::AudioOutput;
     using App::Inputs;
@@ -436,7 +442,7 @@ protected:
     {
         ASSERT_TRUE(game.Objects().empty());
         ASSERT_TRUE(game.PendingAddCount() == 0);
-        ASSERT_NO_THROW(game.InitWindow("Lifetime test", 800, 600));
+        ASSERT_NO_THROW(game.InitTestWindow("Lifetime test", 800, 600));
         for (const auto& object : game.Objects())
         {
             if (auto* candidate = dynamic_cast<Camera*>(object.get()))
@@ -505,8 +511,8 @@ protected:
         manager->Update();
     }
 
-    ScopedDriverHint video{SDL_HINT_VIDEODRIVER, "dummy"};
-    ScopedDriverHint audio{SDL_HINT_AUDIODRIVER, "dummy"};
+    ScopedDriverHint video{SDL_HINT_VIDEO_DRIVER, "dummy"};
+    ScopedDriverHint audio{SDL_HINT_AUDIO_DRIVER, "dummy"};
     ScopedDriverHint render{SDL_HINT_RENDER_DRIVER, "software"};
     InspectableGame game;
     Camera* camera = nullptr;
@@ -551,7 +557,7 @@ TEST_F(GameLifetime, FailedSecondSceneStartupDoesNotInvalidateRunningPhysicsServ
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     const auto active = GameTestAccess::ActiveWorm(game);
     SceneAssetsWithout assets("powerBar.png");
-    ResourceManager resources(game.Renderer(), assets.Directory());
+    ResourceManager resources(game.Renderer(), assets.Directory(), game.AudioOutput().Native());
     GameScene second(game.Renderer(), resources,
                         game.Graphics(), game.AudioOutput(), game.Inputs());
     {
@@ -622,7 +628,7 @@ TEST_F(GameLifetime, SceneDestructionReleasesGameplayButKeepsPlatformAlive)
     EXPECT_TRUE(game.Objects().empty());
     EXPECT_NE(SDL_WasInit(SDL_INIT_VIDEO), 0);
     EXPECT_NE(ImGui::GetCurrentContext(), nullptr);
-    EXPECT_NE(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+    EXPECT_NE(game.AudioOutput().IsOpen(), 0);
     for (int cycle = 0; cycle < 3; ++cycle)
     {
         SCOPED_TRACE(cycle);
@@ -642,7 +648,7 @@ TEST_F(GameLifetime, SceneDestructionReleasesGameplayButKeepsPlatformAlive)
         EXPECT_TRUE(game.PendingAddCount() == 0);
         EXPECT_TRUE(game.PendingRemovalCount() == 0);
         EXPECT_EQ(GameTestAccess::SubscriptionCount(game), 0);
-        EXPECT_EQ(SDL_RenderClear(game.Renderer()), 0);
+        EXPECT_EQ(SDL_RenderClear(game.Renderer()), true);
     }
 }
 
@@ -651,7 +657,7 @@ TEST_F(GameLifetime, FailedSceneInitializationRollsBackAndCanBeRetried)
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     GameTestAccess::ResetScene(game);
     SceneAssetsWithout assets("worms.png");
-    ResourceManager resources(game.Renderer(), assets.Directory());
+    ResourceManager resources(game.Renderer(), assets.Directory(), game.AudioOutput().Native());
     GameScene scene(game.Renderer(), resources,
                         game.Graphics(), game.AudioOutput(), game.Inputs());
     {
@@ -699,11 +705,11 @@ TEST_F(GameLifetime, SameSceneRestartsWithPendingEffectsAndResetsSessionState)
         scene.QueueAdd(std::make_unique<ParticleSystem>("blood.png", 1.f, 0.f, 0.f, 2));
         scene.RequestDestroy(activeProjectile);
         SDL_Event key{};
-        key.type = SDL_KEYDOWN;
+        key.type = SDL_EVENT_KEY_DOWN;
         for (auto code : {SDL_SCANCODE_D, SDL_SCANCODE_SPACE, SDL_SCANCODE_LSHIFT,
                           SDL_SCANCODE_RIGHT, SDL_SCANCODE_E})
         {
-            key.key.keysym.scancode = code;
+            key.key.scancode = code;
             SdlInputAdapter(game.Inputs()).ProcessEvent(key, false);
         }
         Time::deltaTime = 99.0;
@@ -714,9 +720,9 @@ TEST_F(GameLifetime, SameSceneRestartsWithPendingEffectsAndResetsSessionState)
         EXPECT_NO_THROW(scene.Update());
         EXPECT_NO_THROW(scene.Render());
         EXPECT_EQ(game.Renderer(), renderer);
-        EXPECT_EQ(SDL_RenderClear(renderer), 0);
+        EXPECT_EQ(SDL_RenderClear(renderer), true);
         EXPECT_NE(ImGui::GetCurrentContext(), nullptr);
-        EXPECT_NE(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+        EXPECT_NE(game.AudioOutput().IsOpen(), 0);
         ASSERT_NO_THROW(scene.Initialize());
         EXPECT_DOUBLE_EQ(Time::deltaTime, 0.0);
         Time::UpdateFrameTime();
@@ -759,16 +765,16 @@ TEST_F(GameLifetime, FailedGameStartupRollsBackPlatformAndCanBeRetried)
         {
             SceneAssetsWithout assets(missing);
             ScopedWorkingDirectory directory(assets.Directory());
-            EXPECT_THROW(game.InitWindow("Failed startup", 800, 600), SDL_Exception);
+            EXPECT_THROW(game.InitTestWindow("Failed startup", 800, 600), SDL_Exception);
         }
         EXPECT_FALSE(game.HasResources());
         EXPECT_FALSE(game.IsRunning());
         EXPECT_EQ(SDL_WasInit(0), 0u);
         EXPECT_EQ(ImGui::GetCurrentContext(), nullptr);
-        EXPECT_EQ(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+        EXPECT_EQ(game.AudioOutput().IsOpen(), 0);
         EXPECT_EQ(game.PendingAddCount(), 0);
         EXPECT_EQ(game.PendingRemovalCount(), 0);
-        ASSERT_NO_THROW(game.InitWindow("Retry startup", 800, 600));
+        ASSERT_NO_THROW(game.InitTestWindow("Retry startup", 800, 600));
         EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
@@ -782,7 +788,7 @@ TEST_F(GameLifetime, RejectedGameInitializationPreservesRunningSession)
 {
     auto* renderer = game.Renderer();
     auto* scene = &game.Scene();
-    EXPECT_THROW(game.InitWindow("Duplicate startup", 800, 600), std::logic_error);
+    EXPECT_THROW(game.InitTestWindow("Duplicate startup", 800, 600), std::logic_error);
     EXPECT_EQ(game.Renderer(), renderer);
     EXPECT_EQ(&game.Scene(), scene);
     EXPECT_TRUE(game.IsRunning());
@@ -796,8 +802,8 @@ TEST_F(GameLifetime, CleanupKeepsWorldsRendererAndSharedTexturesAliveForObjects)
     auto& music = game.Assets().GetMusic("Rick_Roll.ogg");
     ASSERT_GE(game.AudioOutput().Play(sound, -1), 0);
     ASSERT_NO_THROW(game.AudioOutput().Play(music, -1));
-    ASSERT_GT(Mix_Playing(-1), 0);
-    ASSERT_EQ(Mix_PlayingMusic(), 1);
+    ASSERT_GT(game.AudioOutput().PlayingSounds(), 0);
+    ASSERT_EQ(game.AudioOutput().PlayingMusic(), 1);
     auto* texture = game.Registry().GetComponent<Sprite>(weapon->GetId()).texture;
     ASSERT_NE(texture, nullptr);
     auto& scene = game.Scene();
@@ -809,11 +815,11 @@ TEST_F(GameLifetime, CleanupKeepsWorldsRendererAndSharedTexturesAliveForObjects)
     {
         EXPECT_THROW(scene.Context(), std::logic_error);
         EXPECT_EQ(context.physics.GetContactManager().m_contactListener, nullptr);
-        EXPECT_EQ(SDL_QueryTexture(texture, nullptr, nullptr, nullptr, nullptr), 0);
-        EXPECT_EQ(SDL_RenderClear(context.renderer), 0);
-        EXPECT_NE(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
-        EXPECT_EQ(Mix_Playing(-1), 0);
-        EXPECT_EQ(Mix_PlayingMusic(), 0);
+        EXPECT_EQ(SDL_GetTextureSize(texture, nullptr, nullptr), true);
+        EXPECT_EQ(SDL_RenderClear(context.renderer), true);
+        EXPECT_NE(game.AudioOutput().IsOpen(), 0);
+        EXPECT_EQ(game.AudioOutput().PlayingSounds(), 0);
+        EXPECT_EQ(game.AudioOutput().PlayingMusic(), 0);
         EXPECT_EQ(&context.resources.GetSound("jump.wav"), &sound);
         EXPECT_EQ(&context.resources.GetMusic("Rick_Roll.ogg"), &music);
         EXPECT_NE(ImGui::GetCurrentContext(), nullptr);
@@ -834,7 +840,7 @@ TEST_F(GameLifetime, CleanupKeepsWorldsRendererAndSharedTexturesAliveForObjects)
     EXPECT_EQ(pendingStats->destroyed, 2);
     EXPECT_FALSE(game.HasResources());
     EXPECT_THROW(game.Assets(), std::logic_error);
-    EXPECT_EQ(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(game.AudioOutput().IsOpen(), 0);
     EXPECT_EQ(ImGui::GetCurrentContext(), nullptr);
     EXPECT_EQ(SDL_WasInit(0), 0u);
     EXPECT_NO_THROW(game.Clean());
@@ -1048,7 +1054,7 @@ TEST_F(GameLifetime, RestartedGameRestoresInitialWormSpawnPosition)
         EXPECT_FLOAT_EQ(position.x, -1.f);
         EXPECT_FLOAT_EQ(position.y, 2.f);
         game.Clean();
-        ASSERT_NO_THROW(game.InitWindow("Spawn restart test", 800, 600));
+        ASSERT_NO_THROW(game.InitTestWindow("Spawn restart test", 800, 600));
     }
 }
 
@@ -1110,7 +1116,7 @@ TEST_F(GameLifetime, SceneRejectsInitializedObjectsWithDifferentPhysicsAndCleans
 
 TEST_F(GameLifetime, SceneRejectsDifferentResourceManagerOnSameRendererAndCleansObject)
 {
-    ResourceManager foreignResources(game.Renderer(), game.Assets().AssetRoot());
+    ResourceManager foreignResources(game.Renderer(), game.Assets().AssetRoot(), game.AudioOutput().Native());
     const auto active = game.Objects().size();
     const auto pending = game.PendingAddCount();
     const auto stats = std::make_shared<QueueProbeStats>();
@@ -1314,9 +1320,24 @@ TEST_F(GameLifetime, RemovalRequestedFromCleanupWaitsForNextFrame)
 
 TEST_F(GameLifetime, FramePresentationAndColliderDebugStillWork)
 {
-    game.PreRender();
-    EXPECT_NO_THROW(game.Render());
-    EXPECT_NO_THROW(game.PostRender());
+    for (int frame = 0; frame < 2; ++frame)
+    {
+        game.PreRender();
+        int width, height;
+        SDL_RendererLogicalPresentation mode;
+        ASSERT_TRUE(SDL_GetRenderLogicalPresentation(game.Renderer(), &width, &height, &mode));
+        EXPECT_EQ(width, 800);
+        EXPECT_EQ(height, 600);
+        EXPECT_EQ(mode, SDL_LOGICAL_PRESENTATION_LETTERBOX);
+        float x, y;
+        ASSERT_TRUE(SDL_GetRenderScale(game.Renderer(), &x, &y));
+        EXPECT_FLOAT_EQ(x, 1);
+        EXPECT_FLOAT_EQ(y, 1);
+        EXPECT_NO_THROW(game.Render());
+        EXPECT_NO_THROW(game.PostRender());
+        ASSERT_TRUE(SDL_GetRenderLogicalPresentation(game.Renderer(), &width, &height, &mode));
+        EXPECT_EQ(mode, SDL_LOGICAL_PRESENTATION_DISABLED);
+    }
 }
 
 TEST_F(GameLifetime, CleanupExceptionsDoNotStopSceneDestructionOrNextSceneStartup)
@@ -1359,7 +1380,7 @@ TEST_F(GameLifetime, CleanupExceptionsDoNotStopSceneDestructionOrNextSceneStartu
     EXPECT_TRUE(game.PendingRemovalCount() == 0);
     EXPECT_EQ(GameTestAccess::SubscriptionCount(game), 0);
     EXPECT_FALSE(GameTestAccess::TakePendingException(game));
-    EXPECT_EQ(SDL_RenderClear(game.Renderer()), 0);
+    EXPECT_EQ(SDL_RenderClear(game.Renderer()), true);
 
     GameScene next(game.Renderer(), game.Assets(),
                         game.Graphics(), game.AudioOutput(), game.Inputs());
@@ -1398,7 +1419,7 @@ TEST_F(GameLifetime, MissingWeaponPowerBarRollsBackWithoutDanglingManagerReferen
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     GameTestAccess::ResetScene(game);
     SceneAssetsWithout assets("powerBar.png");
-    ResourceManager resources(game.Renderer(), assets.Directory());
+    ResourceManager resources(game.Renderer(), assets.Directory(), game.AudioOutput().Native());
     GameScene scene(game.Renderer(), resources,
                         game.Graphics(), game.AudioOutput(), game.Inputs());
     {
@@ -1417,7 +1438,7 @@ TEST_F(GameLifetime, MissingWeaponPowerBarRollsBackWithoutDanglingManagerReferen
     EXPECT_EQ(GameTestAccess::SubscriptionCount(game), 0);
     EXPECT_FALSE(GameTestAccess::TakePendingException(game));
     EXPECT_THROW(scene.Context(), std::logic_error);
-    EXPECT_EQ(SDL_RenderClear(game.Renderer()), 0);
+    EXPECT_EQ(SDL_RenderClear(game.Renderer()), true);
     EXPECT_NO_THROW(scene.CleanUp());
     std::filesystem::copy_file(game.Assets().AssetRoot() / "powerBar.png",
                                assets.Directory() / "powerBar.png");
@@ -1434,7 +1455,7 @@ TEST_F(GameLifetime, MissingMusicRollsBackFullyConstructedGameplayAndAllowsRetry
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     GameTestAccess::ResetScene(game);
     SceneAssetsWithout assets("Rick_Roll.ogg");
-    ResourceManager resources(game.Renderer(), assets.Directory());
+    ResourceManager resources(game.Renderer(), assets.Directory(), game.AudioOutput().Native());
     GameScene scene(game.Renderer(), resources,
                         game.Graphics(), game.AudioOutput(), game.Inputs());
     {
@@ -1456,8 +1477,8 @@ TEST_F(GameLifetime, MissingMusicRollsBackFullyConstructedGameplayAndAllowsRetry
     EXPECT_TRUE(game.PendingRemovalCount() == 0);
     EXPECT_EQ(GameTestAccess::SubscriptionCount(game), 0);
     EXPECT_FALSE(GameTestAccess::TakePendingException(game));
-    EXPECT_EQ(Mix_PlayingMusic(), 0);
-    EXPECT_EQ(SDL_RenderClear(game.Renderer()), 0);
+    EXPECT_EQ(game.AudioOutput().PlayingMusic(), 0);
+    EXPECT_EQ(SDL_RenderClear(game.Renderer()), true);
     EXPECT_NO_THROW(scene.CleanUp());
 
     std::filesystem::copy_file(game.Assets().AssetRoot() / "Rick_Roll.ogg",
@@ -1628,7 +1649,7 @@ TEST_F(GameLifetime, GameClosesWithActiveProjectileParticlesAndPendingObjects)
     EXPECT_TRUE(game.PendingRemovalCount() == 0);
     EXPECT_EQ(SDL_WasInit(0), 0u);
     EXPECT_EQ(ImGui::GetCurrentContext(), nullptr);
-    EXPECT_EQ(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(game.AudioOutput().IsOpen(), 0);
     EXPECT_NO_THROW(game.Clean());
 }
 
@@ -1708,7 +1729,7 @@ TEST_F(GameLifetime, EmptyTerrainRebuildRemovesBodyAndCleanupCanBeRepeated)
         if (auto* candidate = dynamic_cast<Map*>(object.get())) map = candidate;
     ASSERT_NE(map, nullptr);
     ASSERT_NE(game.Registry().GetComponent<RigidBody>(map->GetId()).body, nullptr);
-    ASSERT_EQ(SDL_FillRect(MapTestAccess::Surface(*map), nullptr, 0), 0);
+    ASSERT_EQ(SDL_FillSurfaceRect(MapTestAccess::Surface(*map), nullptr, 0), true);
     MapTestAccess::RequestRebuild(*map);
     EXPECT_NO_THROW(map->Update());
     EXPECT_EQ(game.Registry().GetComponent<RigidBody>(map->GetId()).body, nullptr);
@@ -1725,9 +1746,9 @@ TEST_F(GameLifetime, TinyTerrainContourDoesNotCreateInvalidBox2DLoop)
         if (auto* candidate = dynamic_cast<Map*>(object.get())) map = candidate;
     ASSERT_NE(map, nullptr);
     auto* surface = MapTestAccess::Surface(*map);
-    ASSERT_EQ(SDL_FillRect(surface, nullptr, 0), 0);
+    ASSERT_EQ(SDL_FillSurfaceRect(surface, nullptr, 0), true);
     SDL_Rect pixel{surface->w / 2, surface->h / 2, 1, 1};
-    ASSERT_EQ(SDL_FillRect(surface, &pixel, SDL_MapRGBA(surface->format, 255, 255, 255, 255)), 0);
+    ASSERT_EQ(SDL_FillSurfaceRect(surface, &pixel, SDL_MapSurfaceRGBA(surface, 255, 255, 255, 255)), true);
     MapTestAccess::RequestRebuild(*map);
     EXPECT_NO_THROW(map->Update());
     EXPECT_EQ(game.Registry().GetComponent<RigidBody>(map->GetId()).body, nullptr);
@@ -1749,7 +1770,7 @@ TEST_F(GameLifetime, FailedMapTextureReplacementPreservesOldResourcesAndCanBeRet
     EXPECT_EQ(game.Registry().GetComponent<RigidBody>(id).body, oldBody);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
     EXPECT_TRUE(MapTestAccess::HasPendingRebuild(*map));
-    EXPECT_EQ(SDL_QueryTexture(oldTexture, nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(SDL_GetTextureSize(oldTexture, nullptr, nullptr), true);
     EXPECT_NO_THROW(map->Update());
     EXPECT_FALSE(MapTestAccess::HasPendingRebuild(*map));
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
@@ -1827,7 +1848,7 @@ TEST_F(GameLifetime, FailedWeaponTextureLoadAutomaticallyReleasesItsEntity)
 {
     Weapon localWeapon(*camera);
     SceneAssetsWithout assets("powerBar.png");
-    ResourceManager resources(game.Renderer(), assets.Directory());
+    ResourceManager resources(game.Renderer(), assets.Directory(), game.AudioOutput().Native());
     EXPECT_THROW(localWeapon.Initialise(game.ContextWith(resources)), SDL_Exception);
     EXPECT_FALSE(localWeapon.HasEntity());
     EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
@@ -1845,7 +1866,7 @@ TEST_F(GameLifetime, CleanedHealthBarDoesNotReleaseBorrowedTexture)
     bar.Initialise(game.Context());
     bar.CleanUp();
     EXPECT_FALSE(bar.HasEntity());
-    EXPECT_EQ(SDL_QueryTexture(texture.get(), nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(SDL_GetTextureSize(texture.get(), nullptr, nullptr), true);
     EXPECT_NO_THROW(bar.CleanUp());
     EXPECT_NO_THROW(bar.Render());
     EXPECT_NO_THROW(bar.TakeDamage(10));
@@ -1864,7 +1885,7 @@ TEST_F(GameLifetime, RemovingWormPreservesSharedHealthTextureAndCleanedWormCanBe
     EXPECT_NO_THROW(first->Render());
     EXPECT_NO_THROW(first->Jump());
     team->RemoveWorm(first);
-    EXPECT_EQ(SDL_QueryTexture(texture, nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(SDL_GetTextureSize(texture, nullptr, nullptr), true);
     EXPECT_NO_THROW(second->Render());
 }
 
@@ -1882,7 +1903,7 @@ TEST_F(GameLifetime, WeaponAndProjectileCleanupPreserveBorrowedTexture)
     projectile.Initialise(game.Context());
     localWeapon.CleanUp();
     projectile.CleanUp();
-    EXPECT_EQ(SDL_QueryTexture(texture.get(), nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(SDL_GetTextureSize(texture.get(), nullptr, nullptr), true);
     EXPECT_NO_THROW(localWeapon.Render());
     EXPECT_NO_THROW(localWeapon.Update());
     EXPECT_NO_THROW(projectile.Update());
@@ -1903,12 +1924,12 @@ TEST_F(GameLifetime, WormsShareSpriteAndTeamRemovalPreservesCachedDeathSound)
     const auto secondId = second->GetId();
     team->RemoveWorm(first);
     EXPECT_EQ(game.Registry().GetComponent<Sprite>(secondId).texture, sprite);
-    EXPECT_EQ(SDL_QueryTexture(sprite, nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(SDL_GetTextureSize(sprite, nullptr, nullptr), true);
     game.AudioOutput().Play(game.Assets().GetSound("scream.wav"), 100);
     team->RemoveWorm(second);
     team->CleanUp();
     team.reset();
-    EXPECT_GT(Mix_Playing(-1), 0);
+    EXPECT_GT(game.AudioOutput().PlayingSounds(), 0);
     EXPECT_EQ(game.Assets().GetTexture("worms.png"), sprite);
     EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
 }
@@ -1926,7 +1947,7 @@ TEST_F(GameLifetime, ParticleEffectsShareTextureAndCleanupPreservesOtherParticle
     EXPECT_EQ(ParticleSystemTestAccess::Texture(first), nullptr);
     EXPECT_EQ(game.Registry().GetComponent<Sprite>(
                   ParticleSystemTestAccess::FirstParticle(second)).texture, texture);
-    EXPECT_EQ(SDL_QueryTexture(texture, nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(SDL_GetTextureSize(texture, nullptr, nullptr), true);
     second.CleanUp();
     EXPECT_EQ(game.Assets().GetTexture("blood.png"), texture);
     EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
@@ -1949,8 +1970,8 @@ TEST_F(GameLifetime, WeaponManagerDestructionAndWeaponCleanupPreserveProjectileA
     projectile.Initialise(game.Context());
     localWeapon.CleanUp();
     EXPECT_EQ(game.Registry().GetComponent<Sprite>(projectile.GetId()).texture, grenade);
-    EXPECT_EQ(SDL_QueryTexture(grenade, nullptr, nullptr, nullptr, nullptr), 0);
-    EXPECT_EQ(SDL_QueryTexture(powerBar, nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(SDL_GetTextureSize(grenade, nullptr, nullptr), true);
+    EXPECT_EQ(SDL_GetTextureSize(powerBar, nullptr, nullptr), true);
     projectile.CleanUp();
     EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
@@ -2175,8 +2196,8 @@ TEST_F(GameLifetime, MapsOwnIndependentPixelsTexturesAndColliders)
     auto& second = static_cast<Map&>(game.AddObject(std::make_unique<Map>()));
     auto* firstSurface = MapTestAccess::Surface(first);
     auto* secondSurface = MapTestAccess::Surface(second);
-    ASSERT_EQ(firstSurface->format->BytesPerPixel, 4);
-    ASSERT_EQ(secondSurface->format->BytesPerPixel, 4);
+    ASSERT_EQ(SDL_BYTESPERPIXEL(firstSurface->format), 4);
+    ASSERT_EQ(SDL_BYTESPERPIXEL(secondSurface->format), 4);
     EXPECT_NE(firstSurface, secondSurface);
     EXPECT_NE(firstSurface->pixels, secondSurface->pixels);
     EXPECT_NE(MapTestAccess::Texture(first), MapTestAccess::Texture(second));
@@ -2209,8 +2230,8 @@ TEST_F(GameLifetime, MapsOwnIndependentPixelsTexturesAndColliders)
     EXPECT_FLOAT_EQ(secondBody->GetPosition().y, secondPosition.y);
 
     first.CleanUp();
-    EXPECT_EQ(SDL_QueryTexture(secondTexture, nullptr, nullptr, nullptr, nullptr), 0);
-    EXPECT_EQ(SDL_QueryTexture(sourceTexture, nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(SDL_GetTextureSize(secondTexture, nullptr, nullptr), true);
+    EXPECT_EQ(SDL_GetTextureSize(sourceTexture, nullptr, nullptr), true);
     EXPECT_EQ(SnapshotPixels(secondSurface), originalPixels);
     EXPECT_EQ(SnapshotChains(*secondBody), originalChains);
     first.Initialise(game.Context());
@@ -2239,17 +2260,17 @@ TEST_F(GameLifetime, GeneratedTeamTexturesOutliveWormsAndRemainIndependent)
     EXPECT_NE(firstTexture, secondTexture);
     Uint8 red, green, blue, alpha;
     SDL_BlendMode blend;
-    ASSERT_EQ(SDL_GetTextureColorMod(secondTexture, &red, &green, &blue), 0);
-    ASSERT_EQ(SDL_GetTextureAlphaMod(secondTexture, &alpha), 0);
-    ASSERT_EQ(SDL_GetTextureBlendMode(secondTexture, &blend), 0);
-    ASSERT_EQ(SDL_SetTextureColorMod(firstTexture, 20, 40, 60), 0);
-    ASSERT_EQ(SDL_SetTextureAlphaMod(firstTexture, 100), 0);
-    ASSERT_EQ(SDL_SetTextureBlendMode(firstTexture, SDL_BLENDMODE_ADD), 0);
+    ASSERT_EQ(SDL_GetTextureColorMod(secondTexture, &red, &green, &blue), true);
+    ASSERT_EQ(SDL_GetTextureAlphaMod(secondTexture, &alpha), true);
+    ASSERT_EQ(SDL_GetTextureBlendMode(secondTexture, &blend), true);
+    ASSERT_EQ(SDL_SetTextureColorMod(firstTexture, 20, 40, 60), true);
+    ASSERT_EQ(SDL_SetTextureAlphaMod(firstTexture, 100), true);
+    ASSERT_EQ(SDL_SetTextureBlendMode(firstTexture, SDL_BLENDMODE_ADD), true);
     Uint8 actualRed, actualGreen, actualBlue, actualAlpha;
     SDL_BlendMode actualBlend;
-    ASSERT_EQ(SDL_GetTextureColorMod(secondTexture, &actualRed, &actualGreen, &actualBlue), 0);
-    ASSERT_EQ(SDL_GetTextureAlphaMod(secondTexture, &actualAlpha), 0);
-    ASSERT_EQ(SDL_GetTextureBlendMode(secondTexture, &actualBlend), 0);
+    ASSERT_EQ(SDL_GetTextureColorMod(secondTexture, &actualRed, &actualGreen, &actualBlue), true);
+    ASSERT_EQ(SDL_GetTextureAlphaMod(secondTexture, &actualAlpha), true);
+    ASSERT_EQ(SDL_GetTextureBlendMode(secondTexture, &actualBlend), true);
     EXPECT_EQ(actualRed, red);
     EXPECT_EQ(actualGreen, green);
     EXPECT_EQ(actualBlue, blue);
@@ -2259,11 +2280,11 @@ TEST_F(GameLifetime, GeneratedTeamTexturesOutliveWormsAndRemainIndependent)
     KillActiveWorm();
     EXPECT_EQ(firstTeam.Size(), 1);
     EXPECT_EQ(firstTeam.GetHealthBarTexture(), firstTexture);
-    EXPECT_EQ(SDL_QueryTexture(firstTexture, nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(SDL_GetTextureSize(firstTexture, nullptr, nullptr), true);
     EXPECT_NO_THROW(firstTeam.RenderHealthBars());
     manager->DeleteTeam(&firstTeam);
     EXPECT_EQ(secondTeam.GetHealthBarTexture(), secondTexture);
-    EXPECT_EQ(SDL_QueryTexture(secondTexture, nullptr, nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(SDL_GetTextureSize(secondTexture, nullptr, nullptr), true);
     EXPECT_NO_THROW(secondTeam.RenderHealthBars());
     manager->CleanUp();
     EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
@@ -2277,7 +2298,7 @@ TEST_F(GameLifetime, RepeatedTerrainDeformationReplacesResourcesWithoutGrowingCo
         if (auto* candidate = dynamic_cast<Map*>(object.get())) map = candidate;
     ASSERT_NE(map, nullptr);
     auto* surface = MapTestAccess::Surface(*map);
-    ASSERT_EQ(surface->format->BytesPerPixel, 4);
+    ASSERT_EQ(SDL_BYTESPERPIXEL(surface->format), 4);
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     for (int cycle = 0; cycle < 5; ++cycle)
     {
@@ -2291,7 +2312,7 @@ TEST_F(GameLifetime, RepeatedTerrainDeformationReplacesResourcesWithoutGrowingCo
                     const auto* row = reinterpret_cast<const Uint32*>(
                         static_cast<const Uint8*>(surface->pixels) + y * surface->pitch);
                     Uint8 r, g, b, a;
-                    SDL_GetRGBA(row[x], surface->format, &r, &g, &b, &a);
+                    SDL_GetRGBA(row[x], SDL_GetPixelFormatDetails(surface->format), nullptr, &r, &g, &b, &a);
                     if (a) { pixel = {x, y}; break; }
                 }
         }
@@ -2304,8 +2325,8 @@ TEST_F(GameLifetime, RepeatedTerrainDeformationReplacesResourcesWithoutGrowingCo
         map->Update();
         EXPECT_LT(CountOpaquePixels(surface), before);
         EXPECT_EQ(MapTestAccess::OwnedResources(*map), 2);
-        EXPECT_EQ(SDL_QueryTexture(game.Registry().GetComponent<Sprite>(map->GetId()).texture,
-                                  nullptr, nullptr, nullptr, nullptr), 0);
+        EXPECT_TRUE(SDL_GetTextureSize(game.Registry().GetComponent<Sprite>(map->GetId()).texture,
+                                       nullptr, nullptr));
         EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
@@ -2319,7 +2340,7 @@ TEST_F(GameLifetime, RepeatedFullGameStartupAndShutdownReleaseSubsystemsAndSubsc
     for (int cycle = 0; cycle < 5; ++cycle)
     {
         SCOPED_TRACE(cycle);
-        game.InitWindow("Repeated lifetime test", 800, 600);
+        game.InitTestWindow("Repeated lifetime test", 800, 600);
         EXPECT_EQ(game.Registry().GetAmountOfAvailableEntities(), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
@@ -2339,7 +2360,7 @@ TEST_F(GameLifetime, RepeatedFullGameStartupAndShutdownReleaseSubsystemsAndSubsc
         EXPECT_FALSE(GameTestAccess::TakePendingException(game));
         EXPECT_EQ(SDL_WasInit(0), 0);
         EXPECT_EQ(ImGui::GetCurrentContext(), nullptr);
-        EXPECT_EQ(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+        EXPECT_EQ(game.AudioOutput().IsOpen(), 0);
         EXPECT_NO_THROW(game.Clean());
     }
 }
@@ -2462,14 +2483,14 @@ TEST_F(GameLifetime, SurfaceOwnershipMovesAndLocksAreReleasedAfterException)
     auto moved = std::move(*loaded);
     EXPECT_FALSE(loaded->surface);
     EXPECT_EQ(moved.surface.get(), surface);
-    EXPECT_EQ(surface->locked, 0);
+    EXPECT_EQ(surface->flags & SDL_SURFACE_LOCKED, 0u);
     EXPECT_THROW(( [&]()
     {
         Sdl::SurfaceLock lock(surface);
-        EXPECT_GT(surface->locked, 0);
+        EXPECT_NE(surface->flags & SDL_SURFACE_LOCKED, 0u);
         throw std::runtime_error("Surface lock test");
     }() ), std::runtime_error);
-    EXPECT_EQ(surface->locked, 0);
+    EXPECT_EQ(surface->flags & SDL_SURFACE_LOCKED, 0u);
 }
 
 TEST_F(GameLifetime, InputInterruptionCancelsChargeEvenWhenFocusReturnsInTheSameFrame)

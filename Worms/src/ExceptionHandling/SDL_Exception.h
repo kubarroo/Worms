@@ -1,6 +1,6 @@
 #pragma once
 #include "AppException.h"
-#include "SDL2/SDL.h"
+#include "SDL3/SDL.h"
 
 class SDL_Exception : public AppException
 {
@@ -15,10 +15,5 @@ public:
     }
 };
 
-#define SDL_CALL(x)                                                                                \
-    SDL_ClearError();                                                                              \
-    if (x != 0)                                                                                    \
-    throw SDL_Exception(__LINE__, __FILE__)
-#define SDL_CHECK(x)                                                                               \
-    if (x == NULL)                                                                                 \
-    throw SDL_Exception(__LINE__, __FILE__)
+#define SDL_CALL(x) do { if (!(x)) throw SDL_Exception(__LINE__, __FILE__); } while (false)
+#define SDL_CHECK(x) do { if (!(x)) throw SDL_Exception(__LINE__, __FILE__); } while (false)

@@ -2,6 +2,9 @@
 
 `App` owns the platform and ResourceManager: SDL initialization, window, renderer,
 events, ImGui, shared file assets, and the rendering/audio/input adapters.
+The platform uses SDL3, SDL3_image and SDL3_mixer. Audio owns its mixer/device,
+eight effect tracks and one music track. ResourceManager borrows this mixer;
+scene construction validates both renderer and mixer identities.
 `Game` owns `GameScene` and releases it before the platform is shut down.
 
 ## Dependency Context
@@ -134,8 +137,10 @@ registries do not share state. Scene cleanup affects only its own physics
 services, and a fixture cannot be created through a factory for another world.
 
 This is physics isolation, not full parallel-scene support: input, frame timing,
-the renderer, and SDL_mixer playback are still shared. In particular, scene
-startup and cleanup can affect global audio playback, and successful scene
+the renderer, and their application-owned Audio are still shared. In particular, scene
+startup and cleanup can affect playback on that Audio, and successful scene
 startup resets shared input and frame timing. Application cleanup resets both
 as well. Scene lifecycle operations must be coordinated by the owner outside
 active update/render calls; cleanup is not an interrupt of an executing frame.
+Independent Audio instances have independent mixers and stop operations, although
+App's global SDL lifecycle is still not designed for concurrent application instances.

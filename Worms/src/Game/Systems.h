@@ -1,3 +1,4 @@
+#include <numbers>
 #pragma once
 #include "Core/Camera/Camera.h"
 #include "ECS/System.h"
@@ -96,7 +97,7 @@ public:
             auto angle = componentManager.TryGetComponent<Rotation>(ent);
             if (angle.has_value())
                 angle.value().get().degree =
-                    rigidBody.GetData(ent).body->GetAngle() * 180 / static_cast<float>(M_PI);
+                    rigidBody.GetData(ent).body->GetAngle() * 180 / static_cast<float>(std::numbers::pi);
         }
     }
 

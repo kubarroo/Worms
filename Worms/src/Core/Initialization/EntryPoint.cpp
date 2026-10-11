@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <memory>
 #include <system_error>
+#include <SDL3/SDL_main.h>
 
 /* Sets constants */
 #define WIDTH 800
@@ -17,7 +18,7 @@
 
 int main(int argc, char** argv)
 {
-    std::unique_ptr<char, decltype(&SDL_free)> basePath(SDL_GetBasePath(), &SDL_free);
+    const char* basePath = SDL_GetBasePath();
 
     if (!basePath)
     {
@@ -26,7 +27,7 @@ int main(int argc, char** argv)
     }
 
     std::error_code error;
-    std::filesystem::current_path(std::filesystem::u8path(basePath.get()), error);
+    std::filesystem::current_path(std::filesystem::u8path(basePath), error);
 
     if (error)
     {
@@ -44,14 +45,21 @@ int main(int argc, char** argv)
 
         while (game->IsRunning())
         {
+            const auto frameStart = SDL_GetTicksNS();
+            bool presented = false;
             try
             {
                 Time::UpdateFrameTime();
                 game->HandleEvents();
+                if (!game->IsRunning()) break;
                 game->Update();
-                game->PreRender();
-                game->Render();
-                game->PostRender();
+                if (game->ShouldRenderFrame())
+                {
+                    game->PreRender();
+                    game->Render();
+                    game->PostRender();
+                    presented = true;
+                }
             }
             catch (std::exception& e)
             {
@@ -61,6 +69,7 @@ int main(int argc, char** argv)
             {
                 Terminal::Get().Log("Unknown exception during game update", LogLevel::ERROR);
             }
+            game->FinishFrame(frameStart, presented);
         }
     }
     catch (std::exception& e)

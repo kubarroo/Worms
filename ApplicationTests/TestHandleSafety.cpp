@@ -34,16 +34,16 @@ public:
     }
 };
 
-class ScopedSdlTimer
+class ScopedSdlRuntime
 {
 public:
-    ScopedSdlTimer() : result(SDL_Init(SDL_INIT_TIMER)) {}
-    ~ScopedSdlTimer() { SDL_Quit(); }
-    int Result() const { return result; }
-    ScopedSdlTimer(const ScopedSdlTimer&) = delete;
-    ScopedSdlTimer& operator=(const ScopedSdlTimer&) = delete;
+    ScopedSdlRuntime() : result(SDL_Init(0)) {}
+    ~ScopedSdlRuntime() { SDL_Quit(); }
+    bool Result() const { return result; }
+    ScopedSdlRuntime(const ScopedSdlRuntime&) = delete;
+    ScopedSdlRuntime& operator=(const ScopedSdlRuntime&) = delete;
 private:
-    int result;
+    bool result;
 };
 }
 
@@ -111,8 +111,8 @@ TEST(HandleSafety, FocusPointCanHaveNoTargetOrTargetEntityZero)
 
 TEST(HandleSafety, CameraReadsItsPositionAfterComponentCompaction)
 {
-    ScopedSdlTimer timer;
-    ASSERT_EQ(timer.Result(), 0) << SDL_GetError();
+    ScopedSdlRuntime runtime;
+    ASSERT_TRUE(runtime.Result()) << SDL_GetError();
     auto world = std::make_unique<World>(nullptr);
     b2World physics({0, 0});
     HeadlessCommands commands;

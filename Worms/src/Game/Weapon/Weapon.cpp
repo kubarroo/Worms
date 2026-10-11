@@ -1,3 +1,4 @@
+#include <numbers>
 #include <algorithm>
 #include "Core/Input.h"
 #include "Core/Audio/Audio.h"
@@ -79,8 +80,8 @@ void Weapon::Update()
 
 	rot.degree += Context().input.Vertical() * static_cast<float>(Time::deltaTime) * 100.f;
 
-	pos.x += 0.1f * cosf( rot.degree * static_cast<float>(M_PI) / 180 );
-	pos.y += 0.1f * sinf( rot.degree * static_cast<float>(M_PI) / 180 );
+	pos.x += 0.1f * cosf( rot.degree * static_cast<float>(std::numbers::pi) / 180 );
+	pos.y += 0.1f * sinf( rot.degree * static_cast<float>(std::numbers::pi) / 180 );
 
 	if ( Context().input.UseAction() )
 	{
@@ -93,10 +94,10 @@ void Weapon::Update()
 		{
 			canShoot = false;
 			if ( shootingSound ) Context().audio.Play(*shootingSound);
-            auto projectile = std::make_unique<Projectile>( pos.x + 0.5f * cosf( rot.degree * static_cast<float>(M_PI) / 180 ),
-				pos.y + 0.5f * sinf( rot.degree * static_cast<float>(M_PI) / 180 ),
-				force * cosf( rot.degree * static_cast<float>(M_PI) / 180 ),
-                force * sinf( rot.degree * static_cast<float>(M_PI) / 180 ) );
+            auto projectile = std::make_unique<Projectile>( pos.x + 0.5f * cosf( rot.degree * static_cast<float>(std::numbers::pi) / 180 ),
+				pos.y + 0.5f * sinf( rot.degree * static_cast<float>(std::numbers::pi) / 180 ),
+				force * cosf( rot.degree * static_cast<float>(std::numbers::pi) / 180 ),
+                force * sinf( rot.degree * static_cast<float>(std::numbers::pi) / 180 ) );
             auto* proc = projectile.get();
 			proc->SetGravityScale( weaponParams.gravityScale );
 			proc->SetMaxSpeed( weaponParams.maxSpeed );

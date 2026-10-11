@@ -1,6 +1,6 @@
 # Phase 3 Resource Ownership Contract
 
-This is the current contract for phase 3, steps 1 through 5. The older
+This is the current contract after phase 3 and the SDL3 migration. The older
 `ownership-and-cleanup.md` is a historical phase-1 proposal. Scene ownership is
 described in `Architecture.md`.
 
@@ -12,7 +12,7 @@ described in `Architecture.md`.
   Removing a Sprite component does not destroy its texture.
 - SDL textures belong to the renderer that created them and must be released before
   that renderer. SceneContext borrows the renderer; it does not own the platform.
-- Sound and Music exclusively own Mix_Chunk and Mix_Music, respectively. Playback
+- Sound and Music each exclusively own a MIX_Audio asset. Playback
   must stop before their owners are destroyed, while the audio device is still open.
 - Cleanup supports partial initialization and repeated calls. Shutdown must continue
   releasing remaining resources if an object's cleanup reports an error.
@@ -22,7 +22,8 @@ described in `Architecture.md`.
 | Resource | Owner | Borrowers |
 | --- | --- | --- |
 | Window and renderer | App: WindowPtr and RendererPtr | GameScene, SceneContext, rendering objects, ImGui |
-| Audio device and SDL/ImGui initialization | App | Scene and audio wrappers |
+| Mixer, audio device and playback tracks | App through Audio | Scene and audio wrappers |
+| SDL/ImGui initialization | App | Scene and adapters |
 | Cached textures, sounds and music | App through ResourceManager | SceneContext and asset callers |
 | Weapon/projectile textures and weapon sounds | ResourceManager | Weapon, Projectile, Sprite components |
 | Charge-bar texture | ResourceManager | Weapon rendering |
@@ -47,29 +48,35 @@ not a shared mutable cache entry.
    GameScene also stops playback for standalone scene cleanup and startup rollback.
 3. App releases ResourceManager and its cache after all scene borrowers.
 4. App shuts down ImGui backends and its context.
-5. App closes the audio device.
+5. Audio destroys its mixer (and owned tracks/device), then balances MIX_Init with MIX_Quit.
 6. App releases Renderer2D, then resets the native renderer and window.
 7. App calls SDL_Quit for its initialized runtime.
 
 App::Clean also stops playback so it works independently. Only successfully acquired
 platform resources are released; failed initialization runs the same cleanup path.
+SDL audio is initialized before video, so failure of the audio driver does not
+trigger rollback of a concurrently starting Windows video/device-discovery backend.
+SDL_Quit also clears SDL hints and pixel-format details: callers must reapply runtime
+configuration and must not retain SDL_GetPixelFormatDetails pointers across restarts.
 Standalone scenes borrow a live platform and do not close it. Their current cleanup
 stops all playback on the shared mixer, so audio isolation between simultaneous scenes
 is not provided by this contract.
 
 ## ResourceManager
 
-App owns a ResourceManager tied to its renderer, created after renderer/audio
+App owns a ResourceManager tied to its renderer and mixer, created after renderer/audio
 initialization and before the scene. Scenes borrow it through SceneContext and must
-use the same renderer. Headless contexts may use a manager with a null renderer;
-texture loading then throws. Audio loading requires an open mixer device.
+use the same renderer and mixer. Headless contexts may use null native handles;
+texture/audio loading then throws. An explicitly supplied mixer is borrowed and
+must outlive the cache. MIX_Quit must not invalidate assets before cache destruction.
 
 GetTexture, GetSound and GetMusic load on first access and return borrowed assets.
 Failed loads throw SDL_Exception with the filename and library error; no failed entry
 is cached. Sound and Music constructors also report errors this way.
-Sound owns its input SDL_RWops in a local RAII handle and invokes Mix_LoadWAV_RW
-without transferring stream ownership. This closes the file on both success and
-decode failure, including the mixer's unsupported-format error path.
+Sound owns its input SDL_IOStream in a local RAII handle and invokes MIX_LoadAudio_IO
+with predecode=true and closeio=false. The file closes on success and decode failure.
+Music uses MIX_LoadAudio with predecode=false: compressed bytes are cached in memory
+and decoded during playback, rather than storing the whole decoded song.
 
 App::SetAssetRoot configures an explicit base directory before initialization. The
 default is the working directory at initialization for existing launch workflows.
@@ -122,13 +129,22 @@ and rendering systems retain world-to-screen conversion. It never owns or change
 borrowed textures. Native handles remain available for ImGui, asset loading, and
 private mutable texture generation. These native resource operations have not been
 moved behind a new asset/backend hierarchy.
+SDL3 uses floating-point native rendering coordinates. App retains nearest texture
+filtering, letterboxes the logical game resolution, and disables logical presentation
+for the window-space ImGui overlay. The next frame restores game scaling.
+Terrain surfaces are converted to ARGB8888; contour generation uses the actual row
+pitch and the alpha byte. Generated contour bitmaps use contiguous vectors, not
+indexed SDL surfaces with padded rows.
 
 Audio plays borrowed Sound/Music assets; those wrappers only own decoded data.
 Playback counts are total plays: 1 means once, -1 means indefinitely; zero and values
-below -1 are rejected. Sound playback returns a channel index or -1 if unavailable.
+below -1 are rejected. Audio owns eight reusable effect tracks and one music track,
+preserving the previous default channel capacity. Sound playback returns a track index
+or -1 if unavailable. Playback failures otherwise throw with the SDL error.
 Stops are idempotent, including before device initialization or after shutdown.
-Volume is normalized to [0, 1]. The current mixer and stop operations remain global:
-simultaneous scenes do not have isolated audio buses.
+Volume is normalized to [0, 1]. Stops detach assets from tracks before cache destruction.
+Mixer and stop operations are local to Audio, not global; independent Audio instances
+do not stop each other's playback. Scenes sharing an Audio still share its playback.
 
 Input stores platform-independent actions per App. SdlInputAdapter translates events
 after forwarding them to ImGui. BeginFrame clears press/release edges, not held state.

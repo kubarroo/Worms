@@ -1,10 +1,12 @@
 #include "ResourceManager.h"
-#include <SDL_image.h>
+#include <SDL3_image/SDL_image.h>
 #include <stdexcept>
 #include <utility>
 
-ResourceManager::ResourceManager(SDL_Renderer* renderer, std::filesystem::path assetRoot)
-    : renderer(renderer), assetRoot(std::filesystem::absolute(assetRoot).lexically_normal())
+ResourceManager::ResourceManager(SDL_Renderer* renderer, std::filesystem::path assetRoot,
+                                 MIX_Mixer* mixer)
+    : renderer(renderer), mixer(mixer),
+      assetRoot(std::filesystem::absolute(assetRoot).lexically_normal())
 {
 }
 
@@ -26,7 +28,7 @@ SDL_Texture* ResourceManager::GetTexture(const std::filesystem::path& path)
     Sdl::TexturePtr texture(IMG_LoadTexture(renderer, filename.c_str()));
     if (!texture)
     {
-        const auto message = "Could not load texture '" + filename + "': " + IMG_GetError();
+        const auto message = "Could not load texture '" + filename + "': " + SDL_GetError();
         throw SDL_Exception(__LINE__, __FILE__, message.c_str());
     }
     return textures.emplace(key, std::move(texture)).first->second.get();
@@ -34,22 +36,22 @@ SDL_Texture* ResourceManager::GetTexture(const std::filesystem::path& path)
 
 Sound& ResourceManager::GetSound(const std::filesystem::path& path)
 {
-    if (!Mix_QuerySpec(nullptr, nullptr, nullptr))
+    if (!mixer)
         throw std::logic_error("Sound loading requires an open audio device");
     const auto key = Resolve(path);
     if (const auto found = sounds.find(key); found != sounds.end())
         return *found->second;
-    auto sound = std::make_unique<Sound>(key.string());
+    auto sound = std::make_unique<Sound>(mixer, key.string());
     return *sounds.emplace(key, std::move(sound)).first->second;
 }
 
 Music& ResourceManager::GetMusic(const std::filesystem::path& path)
 {
-    if (!Mix_QuerySpec(nullptr, nullptr, nullptr))
+    if (!mixer)
         throw std::logic_error("Music loading requires an open audio device");
     const auto key = Resolve(path);
     if (const auto found = music.find(key); found != music.end())
         return *found->second;
-    auto track = std::make_unique<Music>(key.string());
+    auto track = std::make_unique<Music>(mixer, key.string());
     return *music.emplace(key, std::move(track)).first->second;
 }

@@ -1,5 +1,5 @@
 #pragma once
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include "ExceptionHandling/SDL_Exception.h"
 #include <memory>
 
@@ -19,7 +19,7 @@ struct TextureDeleter
 };
 struct SurfaceDeleter
 {
-    void operator()(SDL_Surface* surface) const noexcept { SDL_FreeSurface(surface); }
+    void operator()(SDL_Surface* surface) const noexcept { SDL_DestroySurface(surface); }
 };
 using TexturePtr = std::unique_ptr<SDL_Texture, TextureDeleter>;
 using SurfacePtr = std::unique_ptr<SDL_Surface, SurfaceDeleter>;

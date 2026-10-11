@@ -1,11 +1,11 @@
 #pragma once
-#include <SDL_mixer.h>
+#include <SDL3_mixer/SDL_mixer.h>
 #include <string>
 
 class Music
 {
 public:
-    Music(const std::string& fileName);
+    Music(MIX_Mixer* mixer, const std::string& fileName);
     Music(const Music&) = delete;
     Music& operator=(const Music&) = delete;
     ~Music();
@@ -13,5 +13,5 @@ public:
 private:
     friend class Audio;
     // Exclusively owned; playback must stop before this wrapper is destroyed.
-    Mix_Music* music = NULL;
+    MIX_Audio* music = nullptr;
 };

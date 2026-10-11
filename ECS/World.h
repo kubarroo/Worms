@@ -2,7 +2,7 @@
 #include "ECS/ComponentManager.h"
 #include "ECS/EntityManager.h"
 #include "ECS/SystemManager.h"
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <optional>
 
 

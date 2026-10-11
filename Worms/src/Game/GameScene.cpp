@@ -17,7 +17,7 @@
 #include "Core/Physics/ContactManager.h"
 #include "Core/Time.h"
 #include "Terminal/Terminal.h"
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include "Core/Renderer2D.h"
 #include "Core/Audio/Audio.h"
 #include <algorithm>
@@ -87,6 +87,8 @@ GameScene::GameScene(SDL_Renderer* renderer, ResourceManager& resources,
         throw std::invalid_argument("Scene requires a renderer");
     if (resources.Renderer() != renderer || rendering.Native() != renderer)
         throw std::invalid_argument("Scene and resource manager require the same renderer");
+    if (resources.Mixer() != audio.Native())
+        throw std::invalid_argument("Scene and resource manager require the same mixer");
 }
 
 GameScene::~GameScene()

@@ -19,7 +19,7 @@ void ResetFrameClock() noexcept
 
 void UpdateFrameTime() noexcept
 {
-    const auto now = SDL_GetTicks64();
+    const auto now = SDL_GetTicks();
     deltaTime = frameClockStarted ? (now - lastFrameTime) / 1000.0 : 0.0;
     lastFrameTime = now;
     frameClockStarted = true;
@@ -27,12 +27,12 @@ void UpdateFrameTime() noexcept
 
 Timer::Timer()
 {
-    lastTime = SDL_GetTicks64();
+    lastTime = SDL_GetTicks();
 }
 
 double Timer::Reset()
 {
-    uint64_t newTime = SDL_GetTicks64();
+    uint64_t newTime = SDL_GetTicks();
     deltaTime = (newTime - lastTime) / 1000.0;
     lastTime = newTime;
     return deltaTime;
@@ -40,7 +40,7 @@ double Timer::Reset()
 
 double Timer::Measure()
 {
-    uint64_t newTime = SDL_GetTicks64();
+    uint64_t newTime = SDL_GetTicks();
     deltaTime = (newTime - lastTime) / 1000.0;
     return deltaTime;
 }

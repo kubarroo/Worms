@@ -3,7 +3,7 @@
 #include "ECS/ECS_Types.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Player/WormTeam.h"
-#include <SDL_stdinc.h>
+#include <SDL3/SDL_stdinc.h>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -13,7 +13,7 @@ SDL_Texture* createTexture(int team, SDL_Renderer* renderer)
     int width = 40;
     int height = 10;
     Sdl::SurfacePtr surface(
-        SDL_CreateRGBSurface(0, width, height, 32, 0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000));
+        SDL_CreateSurface(width, height, SDL_PIXELFORMAT_ARGB8888));
     if (!surface)
     {
         return nullptr;
@@ -39,7 +39,7 @@ SDL_Texture* createTexture(int team, SDL_Renderer* renderer)
         for (int x = 0; x < width; x++)
         {
             const float prc = 0.4f + (static_cast<float>(x) / width) * 0.5f;
-            Uint32 color = SDL_MapRGB(surface->format, static_cast<Uint8>(r * prc),
+            Uint32 color = SDL_MapSurfaceRGB(surface.get(), static_cast<Uint8>(r * prc),
                                       static_cast<Uint8>(g * prc), static_cast<Uint8>(b * prc));
             Uint32* pixels = (Uint32*)surface->pixels;
             pixels[(y * surface->w) + x] = color;

@@ -1,6 +1,6 @@
 #pragma once
 #include <memory>
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include "Core/Audio/Sound.h"
 #include "Core/GameObject.h"
 #include "Core/Physics/Collider.h"

@@ -162,3 +162,31 @@ Headless tests do not replace verification with normal audio and graphics driver
   Remaining manual checks: close the window during music and a weapon sound,
   close with projectiles/particles active, and verify ordinary playback and
   rendering after restart. Headless success is not a claim of complete leak freedom.
+
+## SDL3 Migration Verification
+
+- Migrated platform initialization, SDL main entry point, ImGui backends, rendering,
+  surface/pixel operations, events and audio to SDL3. EnTT migration is separate.
+- Verified Debug and Release builds with the configured Clang presets against
+  SDL 3.4.16, SDL_image 3.4.4 and SDL_mixer 3.2.0 on 2026-10-11.
+  Logs: build/sdl3-build.log and build/sdl3-release-build.log.
+- CTest passed **154/154 tests**; output is saved at build/sdl3-ctest.log.
+  New coverage includes padded contour rows and low/zero alpha, nearest-filtered
+  cached textures, bounded/reusable effect tracks, finite playback, independent
+  mixers, mismatched scene/cache mixers, and close/quit events during playback.
+  Frame rendering checks logical game coordinates and window-space ImGui across
+  consecutive frames. Existing corrupt-file retry and shutdown tests remain active.
+- The final Debug executable passed **three shuffled iterations of 154 tests**
+  (462 executions), with WORMS_CRT_DIAGNOSTICS=1 and seeds 12345 through 12347.
+  build/sdl3-crt.log confirms CRT diagnostics, no heap-integrity failure, no
+  remaining initialized SDL subsystems, and no exit-time CRT leak report.
+  This does not cover all driver/GPU allocations and does not replace ASan.
+- SDL_Quit invalidates pixel-format details and clears hints. Contour tests no
+  longer keep a global format-details pointer; test drivers are reapplied at each
+  startup so retries do not inadvertently switch to native drivers.
+- An early CRT run found Windows input-device-name allocations after audio-driver
+  initialization failure. Initializing SDL audio before video eliminated this
+  rollback issue in the isolated and full-suite runs, without modifying SDL sources.
+- Manual normal-driver gameplay and an ASan-instrumented build were not performed.
+  Check music/effects, aiming and charging, terrain destruction, debug geometry,
+  UI scaling, and closing during active effects on the target system.

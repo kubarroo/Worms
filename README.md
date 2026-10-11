@@ -23,7 +23,7 @@ developed for a university computer graphics course.
 - Git and Git LFS
 
 Dependencies are provided through Git submodules:
-SDL2, SDL2_image, SDL2_mixer, Dear ImGui, and Box2D 2.4.1.
+SDL3, SDL3_image, SDL3_mixer, Dear ImGui, and Box2D 2.4.1.
 GoogleTest is also provided as a submodule and built when tests are enabled.
 
 Game assets and PDF documentation are stored using Git LFS.
@@ -120,7 +120,6 @@ It may not reflect subsequent architecture changes.
 
 ## Planned Changes
 
-- Migrate SDL2 to SDL3
 - Replace the custom ECS with EnTT
 - Improve resource ownership and object lifetimes
 - Refactor scene management and gameplay systems

@@ -6,7 +6,7 @@
 #include "Core/Renderer2D.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Components.h"
-#include "SDL2/SDL_surface.h"
+#include "SDL3/SDL_surface.h"
 #include "box2d/b2_chain_shape.h"
 #include "box2d/b2_fixture.h"
 #include "box2d/b2_polygon_shape.h"
@@ -193,7 +193,8 @@ std::vector<std::vector<b2Vec2>> Map::CreateContour()
     std::vector<std::vector<b2Vec2>> physPoints;
     auto* surf = physTex->surface.get();
     Sdl::SurfaceLock lock(surf);
-    auto shapes = MarchingSquares((Uint32*)surf->pixels, surf->w, surf->h, 64);
+    auto shapes = MarchingSquares((Uint32*)surf->pixels, surf->w, surf->h, 64,
+                                  surf->pitch / sizeof(Uint32));
     for (int i = 0; i < shapes.size(); i++)
     {
         physPoints.push_back({});

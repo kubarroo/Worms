@@ -2,7 +2,7 @@
 #include "Core/SceneContext.h"
 #include "ECS/ECS_Types.h"
 #include "ECS/World.h"
-#include "SDL2/SDL.h"
+#include "SDL3/SDL.h"
 #include <optional>
 #include <stdexcept>
 

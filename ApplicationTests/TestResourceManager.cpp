@@ -1,5 +1,6 @@
 #include "Core/Initialization/App.h"
 #include "Core/ResourceManager.h"
+#include "TestPlatform.h"
 #include "Game/GameScene.h"
 #include <gtest/gtest.h>
 #include <chrono>
@@ -30,6 +31,11 @@ private:
 class ResourceTestApp : public App
 {
 public:
+    void InitWindow(const std::string& title, int width, int height) override
+    {
+        ConfigureTestDrivers();
+        App::InitWindow(title, width, height);
+    }
     using App::Resources;
     using App::Graphics;
     using App::AudioOutput;
@@ -56,8 +62,8 @@ protected:
         std::error_code error;
         std::filesystem::remove_all(temporary, error);
     }
-    ScopedResourceHint video{SDL_HINT_VIDEODRIVER, "dummy"};
-    ScopedResourceHint audio{SDL_HINT_AUDIODRIVER, "dummy"};
+    ScopedResourceHint video{SDL_HINT_VIDEO_DRIVER, "dummy"};
+    ScopedResourceHint audio{SDL_HINT_AUDIO_DRIVER, "dummy"};
     ScopedResourceHint renderer{SDL_HINT_RENDER_DRIVER, "software"};
     ResourceTestApp app;
     std::filesystem::path root;
@@ -160,12 +166,12 @@ TEST_F(ResourceCache, RecreatedScenesReuseCacheAndStopAudioBeforePlatformShutdow
             EXPECT_EQ(&music, &scene.Context().resources.GetMusic("Rick_Roll.ogg"));
             ASSERT_GE(app.AudioOutput().Play(sound, -1), 0);
             ASSERT_NO_THROW(app.AudioOutput().Play(music, -1));
-            EXPECT_GT(Mix_Playing(-1), 0);
-            EXPECT_EQ(Mix_PlayingMusic(), 1);
+            EXPECT_GT(app.AudioOutput().PlayingSounds(), 0);
+            EXPECT_EQ(app.AudioOutput().PlayingMusic(), 1);
         }
-        EXPECT_EQ(Mix_Playing(-1), 0);
-        EXPECT_EQ(Mix_PlayingMusic(), 0);
-        EXPECT_NE(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+        EXPECT_EQ(app.AudioOutput().PlayingSounds(), 0);
+        EXPECT_EQ(app.AudioOutput().PlayingMusic(), 0);
+        EXPECT_NE(app.AudioOutput().IsOpen(), 0);
         EXPECT_NE(SDL_WasInit(SDL_INIT_VIDEO), 0u);
         EXPECT_NE(ImGui::GetCurrentContext(), nullptr);
         EXPECT_EQ(texture, cache.GetTexture("worms.png"));
@@ -176,7 +182,7 @@ TEST_F(ResourceCache, RecreatedScenesReuseCacheAndStopAudioBeforePlatformShutdow
     ASSERT_NO_THROW(app.AudioOutput().Play(music, -1));
     EXPECT_NO_THROW(app.Clean());
     EXPECT_THROW(app.Resources(), std::logic_error);
-    EXPECT_EQ(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(app.AudioOutput().IsOpen(), 0);
     EXPECT_EQ(ImGui::GetCurrentContext(), nullptr);
     EXPECT_EQ(SDL_WasInit(0), 0u);
     EXPECT_NO_THROW(app.Clean());
@@ -242,10 +248,10 @@ TEST_F(ResourceCache, CleanupStopsCachedPlaybackBeforeClosingPlatform)
 {
     app.AudioOutput().Play(app.Resources().GetSound("jump.wav"));
     app.AudioOutput().Play(app.Resources().GetMusic("Rick_Roll.ogg"));
-    EXPECT_GT(Mix_Playing(-1), 0);
-    EXPECT_EQ(Mix_PlayingMusic(), 1);
+    EXPECT_GT(app.AudioOutput().PlayingSounds(), 0);
+    EXPECT_EQ(app.AudioOutput().PlayingMusic(), 1);
     EXPECT_NO_THROW(app.Clean());
-    EXPECT_EQ(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(app.AudioOutput().IsOpen(), 0);
     EXPECT_EQ(SDL_WasInit(0), 0u);
     EXPECT_NO_THROW(app.Clean());
 }
@@ -257,13 +263,13 @@ TEST_F(ResourceCache, AudioAdapterPlaysAndStopsBorrowedAssets)
     auto& music = app.Resources().GetMusic("Rick_Roll.ogg");
     ASSERT_GE(audio.Play(sound, -1), 0);
     ASSERT_NO_THROW(audio.Play(music, -1));
-    EXPECT_GT(Mix_Playing(-1), 0);
-    EXPECT_EQ(Mix_PlayingMusic(), 1);
+    EXPECT_GT(app.AudioOutput().PlayingSounds(), 0);
+    EXPECT_EQ(app.AudioOutput().PlayingMusic(), 1);
     audio.StopSounds();
-    EXPECT_EQ(Mix_Playing(-1), 0);
-    EXPECT_EQ(Mix_PlayingMusic(), 1);
+    EXPECT_EQ(app.AudioOutput().PlayingSounds(), 0);
+    EXPECT_EQ(app.AudioOutput().PlayingMusic(), 1);
     audio.StopAll();
-    EXPECT_EQ(Mix_PlayingMusic(), 0);
+    EXPECT_EQ(app.AudioOutput().PlayingMusic(), 0);
     EXPECT_THROW(audio.Play(sound, 0), std::invalid_argument);
     EXPECT_THROW(audio.Play(music, -2), std::invalid_argument);
     EXPECT_NO_THROW(audio.SetSoundVolume(0.5f));
@@ -272,5 +278,86 @@ TEST_F(ResourceCache, AudioAdapterPlaysAndStopsBorrowedAssets)
     EXPECT_THROW(audio.SetMusicVolume(1.1f), std::invalid_argument);
     audio.SetSoundVolume(1.f);
     audio.SetMusicVolume(1.f);
+}
+TEST_F(ResourceCache, SoundTracksAreBoundedReusableAndDoNotStopMusic)
+{
+    auto& audio = app.AudioOutput();
+    auto& sound = app.Resources().GetSound("jump.wav");
+    audio.Play(app.Resources().GetMusic("Rick_Roll.ogg"), -1);
+    for (int channel = 0; channel < 8; ++channel)
+        EXPECT_EQ(audio.Play(sound, -1), channel);
+    EXPECT_EQ(audio.Play(sound, -1), -1);
+    EXPECT_THROW(audio.Play(sound, 0), std::invalid_argument);
+    EXPECT_EQ(audio.PlayingSounds(), 8);
+    audio.StopSounds();
+    EXPECT_EQ(audio.PlayingSounds(), 0);
+    EXPECT_TRUE(audio.PlayingMusic());
+    EXPECT_EQ(audio.Play(sound, -1), 0);
+}
+
+TEST_F(ResourceCache, FinitePlaybackCompletesAndItsTrackCanBeReused)
+{
+    auto& audio = app.AudioOutput();
+    auto& sound = app.Resources().GetSound("jump.wav");
+    ASSERT_EQ(audio.Play(sound, 2), 0);
+    const auto deadline = SDL_GetTicks() + 5000;
+    while (audio.PlayingSounds() != 0 && SDL_GetTicks() < deadline)
+        SDL_Delay(10);
+    EXPECT_EQ(audio.PlayingSounds(), 0);
+    EXPECT_EQ(audio.Play(sound, -1), 0);
+    SDL_Delay(300);
+    EXPECT_EQ(audio.PlayingSounds(), 1);
+}
+
+TEST_F(ResourceCache, SinglePlaybackResetsLoopingOptionsOnReusedTracks)
+{
+    auto& audio = app.AudioOutput();
+    auto& sound = app.Resources().GetSound("jump.wav");
+    auto& music = app.Resources().GetMusic("jump.wav");
+    ASSERT_EQ(audio.Play(sound, -1), 0);
+    audio.Play(music, -1);
+    audio.StopAll();
+    ASSERT_EQ(audio.Play(sound, 1), 0);
+    audio.Play(music, 1);
+    const auto deadline = SDL_GetTicks() + 5000;
+    while ((audio.PlayingSounds() != 0 || audio.PlayingMusic()) && SDL_GetTicks() < deadline)
+        SDL_Delay(10);
+    EXPECT_EQ(audio.PlayingSounds(), 0);
+    EXPECT_FALSE(audio.PlayingMusic());
+    EXPECT_EQ(audio.Play(sound, -1), 0);
+    audio.Play(music, -1);
+    SDL_Delay(300);
+    EXPECT_EQ(audio.PlayingSounds(), 1);
+    EXPECT_TRUE(audio.PlayingMusic());
+}
+
+TEST_F(ResourceCache, MixersAreIndependentAndScenesRejectForeignAudio)
+{
+    auto& audio = app.AudioOutput();
+    audio.Play(app.Resources().GetSound("jump.wav"), -1);
+    {
+        Audio other;
+        other.Open();
+        EXPECT_NE(other.Native(), audio.Native());
+        EXPECT_THROW(other.Open(), std::logic_error);
+        ResourceManager otherCache(app.Renderer(), root, other.Native());
+        other.Play(otherCache.GetSound("jump.wav"), -1);
+        EXPECT_THROW(GameScene(app.Renderer(), otherCache, app.Graphics(), audio, app.Inputs()),
+                     std::invalid_argument);
+        other.StopAll();
+        EXPECT_EQ(other.PlayingSounds(), 0);
+        EXPECT_GT(audio.PlayingSounds(), 0);
+    }
+    EXPECT_TRUE(audio.IsOpen());
+    EXPECT_GT(audio.PlayingSounds(), 0);
+    audio.StopAll();
+    EXPECT_GE(audio.Play(app.Resources().GetSound("jump.wav"), -1), 0);
+}
+
+TEST_F(ResourceCache, SharedTexturesRetainNearestFiltering)
+{
+    SDL_ScaleMode mode;
+    ASSERT_TRUE(SDL_GetTextureScaleMode(app.Resources().GetTexture("worms.png"), &mode));
+    EXPECT_EQ(mode, SDL_SCALEMODE_NEAREST);
 }
 } // namespace
