@@ -14,6 +14,7 @@
 #include <memory>
 #include <numbers>
 #include <type_traits>
+#include <vector>
 
 static_assert(std::is_default_constructible_v<GameObject>);
 static_assert(!std::is_copy_constructible_v<GameObject>);
@@ -216,7 +217,7 @@ TEST(HandleSafety, HandlesRejectReusedSlotsAndForeignWorlds)
 
     world.destroy(target);
     EXPECT_FALSE(world.valid(target));
-    EXPECT_EQ(EntityCount(world), 0u);
+    EXPECT_EQ(LiveEntityCount(world), 0u);
     EXPECT_FALSE(IsValid(world, *handle));
     const auto replacement = world.create();
     ASSERT_EQ(entt::to_entity(replacement), entt::to_entity(target));
@@ -226,7 +227,7 @@ TEST(HandleSafety, HandlesRejectReusedSlotsAndForeignWorlds)
     EXPECT_FALSE(world.try_get<Position>(replacement));
     // Recycled entities start without components and reject the old identifier.
     EXPECT_NO_THROW(world.destroy(replacement));
-    EXPECT_EQ(EntityCount(world), 0u);
+    EXPECT_EQ(LiveEntityCount(world), 0u);
 }
 
 TEST(HandleSafety, ObserversClearMissingPositionAndDoNotResumeAfterItIsAddedBack)
@@ -301,7 +302,7 @@ TEST(HandleSafety, RegistryComponentsCanBeReadRemovedAndRecreated)
     auto& world = registry;
     const auto entity = registry.create();
     registry.emplace<Position>(entity, 3.f, 4.f);
-    EXPECT_EQ(EntityCount(world), 1u);
+    EXPECT_EQ(LiveEntityCount(world), 1u);
     world.get<Position>(entity).x = 5;
     EXPECT_FLOAT_EQ(registry.get<Position>(entity).x, 5);
     EXPECT_TRUE(world.all_of<Position>(entity));
@@ -313,18 +314,35 @@ TEST(HandleSafety, RegistryComponentsCanBeReadRemovedAndRecreated)
     EXPECT_FALSE(registry.valid(entity));
     EXPECT_FALSE(world.try_get<Position>(entity));
     EXPECT_FALSE(MakeHandle(world, entity));
-    EXPECT_EQ(EntityCount(world), 0u);
+    EXPECT_EQ(LiveEntityCount(world), 0u);
 }
 
-TEST(HandleSafety, RegistryGrowsBeyondTheFormerEntityLimit)
+TEST(HandleSafety, LargeEntityPopulationIsFullyCleanedAcrossRepeatedCycles)
 {
     entt::registry registry;
-    auto& world = registry;
-    for (std::size_t count = 0; count < 50001; ++count)
-        static_cast<void>(world.create());
-    EXPECT_EQ(EntityCount(world), 50001u);
-    registry.clear();
-    EXPECT_EQ(EntityCount(world), 0u);
+    constexpr std::size_t population = 100000;
+    std::vector<EntityHandle> handles;
+    handles.reserve(population);
+    EXPECT_EQ(LiveEntityCount(registry), 0u);
+    for (int cycle = 0; cycle < 2; ++cycle)
+    {
+        handles.clear();
+        for (std::size_t count = 0; count < population; ++count)
+        {
+            const auto entity = registry.create();
+            registry.emplace<Position>(entity, Position{1, 2});
+            handles.push_back({entity, &registry});
+        }
+        EXPECT_EQ(LiveEntityCount(registry), population);
+        registry.clear();
+        EXPECT_EQ(LiveEntityCount(registry), 0u);
+        EXPECT_TRUE(registry.view<Position>().empty());
+        for (const auto handle : handles)
+        {
+            ASSERT_FALSE(IsValid(registry, handle));
+            ASSERT_EQ(registry.try_get<Position>(handle.id), nullptr);
+        }
+    }
 }
 
 TEST(HandleSafety, ViewsUpdateMatchingComponentsAndRejectForeignFollowHandles)

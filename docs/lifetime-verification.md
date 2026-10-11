@@ -30,13 +30,19 @@ Tests in `ApplicationTests/TestGameLifetime.cpp` use SDL `dummy` drivers and the
 | Corrupt assets | Image, sound and music failures include the filename, repeated attempts fail without caching an invalid asset, and replacing the file permits loading and deduplicated reuse |
 | Session state | Held input and pending weapon change are reset; the first frame after resetting the frame clock has zero elapsed time |
 
-Repeated cycles compare available entity slots, Box2D bodies, subscriptions, and
+Repeated cycles compare live entities, Box2D bodies, subscriptions, and
 object queues. Tests check that weapon and particle-system asset references are
 cleared without freeing cached textures, and that the map's private texture and
 surface are released. Additional tests verify shared worm/particle textures,
 continued death-sound playback after team deletion, and projectile assets surviving
 WeaponManager destruction. These are not global SDL allocation counters or proof
 that no leaks exist.
+
+EnTT tests count living entities through the entity view, not storage capacity
+or free-slot counters. A repeated large-population test verifies component cleanup
+and invalidation of all retained handles. Behavior tests retain coverage of camera
+target loss, projectile removal, particle cleanup, callback lifetimes, scene
+restart, and partial-initialization rollback. Custom ECS storage tests are obsolete.
 
 Mutable-resource tests compare full terrain pixel snapshots and Box2D chain geometry
 for two maps, deform and clean one, and verify the other and a reinitialized map.
@@ -190,3 +196,24 @@ Headless tests do not replace verification with normal audio and graphics driver
 - Manual normal-driver gameplay and an ASan-instrumented build were not performed.
   Check music/effects, aiming and charging, terrain destruction, debug geometry,
   UI scaling, and closing during active effects on the target system.
+
+## Phase-4 Final-Step Verification
+
+- Verified on 2026-10-11. Debug and Release builds completed after removing
+  the custom ECS directory, its CMake target, and the unused ECS exception.
+  Gameplay and tests now depend directly on `EnTT::EnTT`; owner-aware handles
+  are defined in `Core/EntityHandle.h`.
+- CTest passed **192/192 tests** in `build/debug`. A separate configuration and
+  full build from scratch in `build/entt-clean-verification` also completed,
+  and its CTest run passed **192/192 tests**.
+- The full Debug suite passed **three shuffled iterations in one process**,
+  starting with seed `12345`: **576/576 test executions**.
+- The population test creates and clears 100,000 entities in each of two
+  cycles, checking live entity counts, component cleanup, and invalidation of
+  every retained handle. Existing camera, projectile, particle, callback,
+  restart, and startup-rollback behavior tests remain active.
+- Source and CMake checks found no remaining custom ECS manager/storage,
+  capacity-limit, free-slot counter, or `worms_ecs` references.
+- CRT leak diagnostics, ASan instrumentation, and interactive gameplay checks
+  were not performed for this step. Passing tests do not prove complete
+  memory-leak freedom.

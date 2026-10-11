@@ -1,6 +1,6 @@
 #include "Game/Player/WormManager.h"
 #include "Core/Input.h"
-#include "ECS/ECS_Types.h"
+#include "Core/EntityHandle.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Player/WormTeam.h"
 #include <SDL3/SDL_stdinc.h>

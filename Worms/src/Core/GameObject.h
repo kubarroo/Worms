@@ -1,6 +1,6 @@
 #pragma once
 #include "Core/SceneContext.h"
-#include "ECS/ECS_Types.h"
+#include "Core/EntityHandle.h"
 #include "SDL3/SDL.h"
 #include <optional>
 #include <stdexcept>

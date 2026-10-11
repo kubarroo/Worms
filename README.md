@@ -90,8 +90,9 @@ configuration before pressing F5.
 
 ## Tests
 
-ApplicationTests contains six GoogleTest cases for terrain contour generation
-with Marching Squares. Tests are integrated with CMake and CTest.
+ApplicationTests covers terrain contour generation, EnTT handles and systems,
+gameplay lifetimes, scene restart and rollback, collision callbacks, resources,
+and platform adapters. Tests are integrated with CMake and CTest.
 
 The Debug preset enables WORMS_BUILD_TESTS; the Release preset disables it.
 Build and run the tests from the repository root:
@@ -124,6 +125,8 @@ Gameplay uses the scene-owned EnTT registry directly. Entity handles validate
 both the owning registry and the entity version. Objects release physics bodies
 and collision subscriptions through their cleanup process before destroying
 their entities; removing an ECS component does not release a Box2D body.
+EntityId, EntityHandle, and IsValid are defined in Core/EntityHandle.h. The game
+and tests depend directly on EnTT::EnTT; there is no custom ECS module.
 
 During frames and collision callbacks, use QueueAdd and RequestDestroy instead
 of immediate object initialization/cleanup. Rejected objects retain ownership

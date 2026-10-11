@@ -464,7 +464,7 @@ protected:
         }
         ASSERT_NE(camera, nullptr);
         ASSERT_NE(weapon, nullptr);
-        initialEntities = EntityCount(game.Registry());
+        initialEntities = LiveEntityCount(game.Registry());
         initialBodies = game.Physics().GetBodyCount();
     }
 
@@ -558,7 +558,7 @@ TEST_F(GameLifetime, SecondSceneOwnsIndependentPhysicsServicesAndCleanup)
         EXPECT_NO_THROW(second.CleanUp());
         EXPECT_FALSE(GameTestAccess::HasResources(second));
     }
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
     EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
     EXPECT_NO_THROW(game.Update());
@@ -578,7 +578,7 @@ TEST_F(GameLifetime, FailedSecondSceneStartupDoesNotInvalidateRunningPhysicsServ
     }
     EXPECT_FALSE(GameTestAccess::HasResources(second));
     EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
     EXPECT_EQ(GameTestAccess::ActiveWorm(game), active);
     EXPECT_NO_THROW(game.Update());
@@ -812,7 +812,7 @@ TEST_F(GameLifetime, SameSceneRestartsWithPendingEffectsAndResetsSessionState)
         scene.CleanUp();
         EXPECT_FALSE(registry.valid(firstWorm));
         EXPECT_FALSE(registry.valid(unmanaged));
-        EXPECT_EQ(registry.storage<entt::entity>().free_list(), 0u);
+        EXPECT_EQ(LiveEntityCount(registry), 0u);
         EXPECT_FALSE(registry.ctx().contains<RenderSequence>());
         EXPECT_FALSE(GameTestAccess::HasResources(scene));
         EXPECT_THROW(scene.Context(), std::logic_error);
@@ -851,7 +851,7 @@ TEST_F(GameLifetime, SameSceneRestartsWithPendingEffectsAndResetsSessionState)
             if (auto* newWeapon = dynamic_cast<Weapon*>(object.get()))
                 EXPECT_FLOAT_EQ(WeaponTestAccess::Charge(*newWeapon), 0.f);
         }
-        EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+        EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(GameTestAccess::SubscriptionCount(scene), subscriptions);
         EXPECT_EQ(game.PendingAddCount(), 0);
@@ -882,7 +882,7 @@ TEST_F(GameLifetime, FailedGameStartupRollsBackPlatformAndCanBeRetried)
         EXPECT_EQ(game.PendingAddCount(), 0);
         EXPECT_EQ(game.PendingRemovalCount(), 0);
         ASSERT_NO_THROW(game.InitTestWindow("Retry startup", 800, 600));
-        EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+        EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
         EXPECT_NO_THROW(game.Update());
@@ -976,7 +976,7 @@ TEST_F(GameLifetime, GameplayConstructorsDoNotAllocateEntitiesBodiesOrSubscripti
     EXPECT_FALSE(focus.HasEntity());
     EXPECT_FALSE(localWeapon.HasEntity());
     EXPECT_THROW(worms.CreateTeam(1), std::logic_error);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
     EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
     EXPECT_EQ(game.PendingAddCount(), pending);
@@ -988,12 +988,12 @@ TEST_F(GameLifetime, WormInitializationFailureCanBeRetriedWithTheSameObject)
     auto& localRegistry = game.Context().registry;
     auto& incomplete = localRegistry;
     ScopedComponentFailure<Follow> failure(localRegistry);
-    const auto available = EntityCount(incomplete);
+    const auto entitiesBefore = LiveEntityCount(incomplete);
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     Worm worm(*camera, team->GetHealthBarTexture(), {3.f, 4.f});
     EXPECT_THROW(worm.Initialise(game.ContextWith(incomplete)), std::exception);
     EXPECT_FALSE(worm.HasEntity());
-    EXPECT_EQ(EntityCount(incomplete), available);
+    EXPECT_EQ(LiveEntityCount(incomplete), entitiesBefore);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
     EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
     failure.Stop();
@@ -1009,7 +1009,7 @@ TEST_F(GameLifetime, WormInitializationFailureCanBeRetriedWithTheSameObject)
     EXPECT_FLOAT_EQ(game.Registry().get<Position>(worm.GetId()).x, 3.f);
     EXPECT_FLOAT_EQ(game.Registry().get<Position>(worm.GetId()).y, 4.f);
     worm.CleanUp();
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
     EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
 }
@@ -1031,7 +1031,7 @@ TEST_F(GameLifetime, PhysicsObjectsRejectForeignWorldBeforeAllocatingResources)
     EXPECT_FALSE(worm.HasEntity());
     EXPECT_FALSE(projectile.HasEntity());
     EXPECT_FALSE(map.HasEntity());
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
     EXPECT_EQ(foreignPhysics.GetBodyCount(), 0);
     EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
@@ -1041,7 +1041,7 @@ TEST_F(GameLifetime, PhysicsObjectsRejectForeignWorldBeforeAllocatingResources)
     worm.CleanUp();
     projectile.CleanUp();
     map.CleanUp();
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
     EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
 }
@@ -1049,22 +1049,21 @@ TEST_F(GameLifetime, PhysicsObjectsRejectForeignWorldBeforeAllocatingResources)
 TEST_F(GameLifetime, PhysicsWorldValidationPrecedesEntityAllocation)
 {
     entt::registry localRegistry;
-    auto& exhausted = localRegistry;
     b2World foreignPhysics({0, 0});
-    const SceneContext foreign{game.Renderer(),          exhausted,
+    const SceneContext foreign{game.Renderer(),          localRegistry,
                                foreignPhysics,           game.Scene(),
                                game.Context().colliders, game.Context().contacts,
                                game.Context().resources, game.Graphics(), game.AudioOutput(), game.Inputs()};
     Worm worm(*camera, nullptr, {0.f, 2.f});
     Projectile projectile(0, 2, 0, 0);
     Map map;
-    const auto entities = EntityCount(exhausted);
+    const auto entities = LiveEntityCount(localRegistry);
     EXPECT_THROW(worm.Initialise(foreign), std::invalid_argument);
     EXPECT_THROW(projectile.Initialise(foreign), std::invalid_argument);
     EXPECT_THROW(map.Initialise(foreign), std::invalid_argument);
     EXPECT_EQ(foreignPhysics.GetBodyCount(), 0);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
-    EXPECT_EQ(EntityCount(exhausted), entities);
+    EXPECT_EQ(LiveEntityCount(localRegistry), entities);
 }
 
 TEST_F(GameLifetime, PhysicsObjectsRejectMismatchedContactManagerBeforeInitialization)
@@ -1084,7 +1083,7 @@ TEST_F(GameLifetime, PhysicsObjectsRejectMismatchedContactManagerBeforeInitializ
     EXPECT_FALSE(map.HasEntity());
     EXPECT_EQ(foreignContacts.GetSubscriptionCount(), 0);
     EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
 }
 
@@ -1102,7 +1101,7 @@ TEST_F(GameLifetime, TeamRejectsWormsBeforeInitializationAndAfterCleanupWithoutL
         worm->Initialise(game.Context());
         EXPECT_THROW(team->AddWorm(std::move(worm)), std::logic_error);
         EXPECT_EQ(team->Size(), 0);
-        EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+        EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
     };
@@ -1165,10 +1164,10 @@ TEST_F(GameLifetime, HealthBarInitializationFailurePreservesConfigurationForRetr
     CreateTestTeam();
     ScopedComponentFailure<Follow> failure(game.Context().registry);
     HealthBar bar(camera->GetHandle(), *camera, 75, team->GetHealthBarTexture());
-    const auto entities = EntityCount(game.Registry());
+    const auto entities = LiveEntityCount(game.Registry());
     EXPECT_THROW(bar.Initialise(game.Context()), std::exception);
     EXPECT_FALSE(bar.HasEntity());
-    EXPECT_EQ(EntityCount(game.Registry()), entities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), entities);
     failure.Stop();
     ASSERT_NO_THROW(bar.Initialise(game.Context()));
     EXPECT_EQ(bar.getCurrentHp(), 75);
@@ -1177,7 +1176,7 @@ TEST_F(GameLifetime, HealthBarInitializationFailurePreservesConfigurationForRetr
     ASSERT_NO_THROW(bar.Initialise(game.Context()));
     EXPECT_EQ(bar.getCurrentHp(), 75);
     bar.CleanUp();
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
 }
 
 TEST_F(GameLifetime, ObjectContextIsCopiedAndUnavailableOutsideItsLifetime)
@@ -1188,7 +1187,7 @@ TEST_F(GameLifetime, ObjectContextIsCopiedAndUnavailableOutsideItsLifetime)
     EXPECT_EQ(&probe.Owner(), &game.Scene());
     probe.CleanUp();
     EXPECT_THROW(probe.Owner(), std::logic_error);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
 }
 
 TEST_F(GameLifetime, SceneRejectsInitializedObjectsWithForeignCommands)
@@ -1199,7 +1198,7 @@ TEST_F(GameLifetime, SceneRejectsInitializedObjectsWithForeignCommands)
     object->Initialise(SceneContext{game.Renderer(), game.Registry(), game.Physics(), foreign,
                                     game.Context().colliders, game.Context().contacts, game.Assets(), game.Graphics(), game.AudioOutput(), game.Inputs()});
     EXPECT_THROW(game.AddObject(std::move(object)), std::invalid_argument);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_EQ(game.PendingAddCount(), 0);
     EXPECT_THROW(foreign.Context(), std::logic_error);
 }
@@ -1211,7 +1210,7 @@ TEST_F(GameLifetime, SceneRejectsInitializedObjectsWithDifferentPhysicsAndCleans
     object->Initialise(SceneContext{game.Renderer(), game.Registry(), foreignPhysics, game.Scene(),
                                     game.Context().colliders, game.Context().contacts, game.Assets(), game.Graphics(), game.AudioOutput(), game.Inputs()});
     EXPECT_THROW(game.AddObject(std::move(object)), std::invalid_argument);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_EQ(game.PendingAddCount(), 0);
 }
 
@@ -1228,11 +1227,11 @@ TEST_F(GameLifetime, SceneRejectsDifferentResourceManagerOnSameRendererAndCleans
                                foreignContext.colliders, foreignContext.contacts, foreignResources,
                                game.Graphics(), game.AudioOutput(), game.Inputs()};
     object->Initialise(context);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities + 1);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities + 1);
     EXPECT_THROW(game.AddObject(std::move(object)), std::invalid_argument);
     EXPECT_EQ(stats->cleaned, 1);
     EXPECT_EQ(stats->destroyed, 1);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_EQ(game.Objects().size(), active);
     EXPECT_EQ(game.PendingAddCount(), pending);
 }
@@ -1242,7 +1241,7 @@ TEST_F(GameLifetime, QueueRejectionCleansAnAlreadyInitializedObject)
     auto object = std::make_unique<GameObject>();
     object->Initialise(game.Context());
     EXPECT_THROW(game.QueueAdd(std::move(object)), std::invalid_argument);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_EQ(game.PendingAddCount(), 0);
 }
 
@@ -1327,13 +1326,13 @@ TEST_F(GameLifetime, FailedMiddleAdditionDoesNotReinitializeEarlierObjectsOrLose
     EXPECT_EQ(game.Objects().size(), active + 1);
     EXPECT_EQ(game.PendingAddCount(), 1);
     EXPECT_EQ(game.PendingRemovalCount(), 0);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities + 1);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities + 1);
     EXPECT_NO_THROW(game.Update());
     EXPECT_EQ(first->initialized, 1);
     EXPECT_EQ(last->initialized, 1);
     EXPECT_EQ(game.Objects().size(), active + 2);
     EXPECT_EQ(game.PendingAddCount(), 0);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities + 2);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities + 2);
 }
 
 TEST_F(GameLifetime, ImmediateInitializationRollbackDefersShutdownUntilCleanupReturns)
@@ -1401,7 +1400,7 @@ TEST_F(GameLifetime, FailedPhysicalRollbackPreservesOriginalExceptionAndRetriesC
     EXPECT_EQ(stats->destroyed, 0);
     EXPECT_EQ(game.PendingRemovalCount(), 0);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies + 1);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities + 1);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities + 1);
     // The retained fixture still borrows valid metadata while cleanup awaits retry.
     for (auto [entity, rigidBody] : game.Registry().view<RigidBody>().each())
     {
@@ -1433,7 +1432,7 @@ TEST_F(GameLifetime, FailedPhysicalRollbackPreservesOriginalExceptionAndRetriesC
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies + 1);
     game.Physics().DestroyBody(obstacle);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
 }
 
 TEST_F(GameLifetime, PendingObjectCanBeCancelledBeforeInitialization)
@@ -1450,7 +1449,7 @@ TEST_F(GameLifetime, PendingObjectCanBeCancelledBeforeInitialization)
     EXPECT_EQ(stats->destroyed, 1);
     EXPECT_EQ(game.PendingAddCount(), 0);
     EXPECT_EQ(game.PendingRemovalCount(), 0);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
 }
 
 TEST_F(GameLifetime, QueueRejectsNullObjectsAndRemovalOfObjectsOutsideScene)
@@ -1487,14 +1486,14 @@ TEST_F(GameLifetime, RemovalCleanupFailurePreservesOwnershipAndRemainingRequests
     EXPECT_EQ(firstStats->destroyed, 0);
     EXPECT_EQ(lastStats->cleaned, 0);
     EXPECT_EQ(game.PendingRemovalCount(), 2);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities + 2);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities + 2);
     EXPECT_NO_THROW(game.Update());
     EXPECT_EQ(firstStats->cleaned, 2);
     EXPECT_EQ(firstStats->destroyed, 1);
     EXPECT_EQ(lastStats->cleaned, 1);
     EXPECT_EQ(lastStats->destroyed, 1);
     EXPECT_EQ(game.PendingRemovalCount(), 0);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
 }
 
 TEST_F(GameLifetime, RemovalRequestedFromCleanupWaitsForNextFrame)
@@ -1516,7 +1515,7 @@ TEST_F(GameLifetime, RemovalRequestedFromCleanupWaitsForNextFrame)
     game.Update();
     EXPECT_EQ(lastStats->destroyed, 1);
     EXPECT_EQ(game.PendingRemovalCount(), 0);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
 }
 
 TEST_F(GameLifetime, FramePresentationAndColliderDebugStillWork)
@@ -1586,7 +1585,7 @@ TEST_F(GameLifetime, CleanupExceptionsDoNotStopSceneDestructionOrNextSceneStartu
     GameScene next(game.Renderer(), game.Assets(),
                         game.Graphics(), game.AudioOutput(), game.Inputs());
     ASSERT_NO_THROW(next.Initialize());
-    EXPECT_EQ(EntityCount(GameTestAccess::Registry(next)), initialEntities);
+    EXPECT_EQ(LiveEntityCount(GameTestAccess::Registry(next)), initialEntities);
     EXPECT_EQ(GameTestAccess::Physics(next).GetBodyCount(), initialBodies);
     EXPECT_EQ(GameTestAccess::SubscriptionCount(next), subscriptions);
 }
@@ -1672,7 +1671,7 @@ TEST_F(GameLifetime, MissingWeaponPowerBarRollsBackWithoutDanglingManagerReferen
     std::filesystem::copy_file(game.Assets().AssetRoot() / "powerBar.png",
                                assets.Directory() / "powerBar.png");
     ASSERT_NO_THROW(scene.Initialize());
-    EXPECT_EQ(EntityCount(GameTestAccess::Registry(scene)), initialEntities);
+    EXPECT_EQ(LiveEntityCount(GameTestAccess::Registry(scene)), initialEntities);
     EXPECT_EQ(GameTestAccess::Physics(scene).GetBodyCount(), initialBodies);
     EXPECT_EQ(GameTestAccess::SubscriptionCount(scene), subscriptions);
     EXPECT_NO_THROW(scene.CleanUp());
@@ -1713,7 +1712,7 @@ TEST_F(GameLifetime, MissingMusicRollsBackFullyConstructedGameplayAndAllowsRetry
     std::filesystem::copy_file(game.Assets().AssetRoot() / "Rick_Roll.ogg",
                                assets.Directory() / "Rick_Roll.ogg");
     ASSERT_NO_THROW(scene.Initialize());
-    EXPECT_EQ(EntityCount(GameTestAccess::Registry(scene)), initialEntities);
+    EXPECT_EQ(LiveEntityCount(GameTestAccess::Registry(scene)), initialEntities);
     EXPECT_EQ(GameTestAccess::Physics(scene).GetBodyCount(), initialBodies);
     EXPECT_EQ(GameTestAccess::SubscriptionCount(scene), subscriptions);
     EXPECT_NO_THROW(scene.CleanUp());
@@ -1733,7 +1732,7 @@ TEST_F(GameLifetime, RemovingActiveWormSelectsSuccessorAndReleasesItsResources)
     EXPECT_EQ(destroyedWorms, 1);
     EXPECT_FALSE(game.Registry().try_get<Position>(removedId));
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies + 1);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities + 3);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities + 3);
 }
 
 TEST_F(GameLifetime, RemovingEarlierInactiveWormPreservesTheActiveWorm)
@@ -1763,7 +1762,7 @@ TEST_F(GameLifetime, RemovingLastWormAndRepeatedCleanupRestoreResourceCounts)
     EXPECT_NO_THROW(team->CleanUp());
     EXPECT_NO_THROW(team->CleanUp());
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
 }
 
 TEST_F(GameLifetime, CleanupDestroysAllRemainingWorms)
@@ -1775,7 +1774,7 @@ TEST_F(GameLifetime, CleanupDestroysAllRemainingWorms)
     team->CleanUp();
     EXPECT_EQ(destroyedWorms, 2);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_NO_THROW(team->CleanUp());
 }
 
@@ -1791,7 +1790,7 @@ TEST_F(GameLifetime, EliminatedTeamIsReleasedAndNextTurnDoesNotSkipAnotherTeam)
     EXPECT_NE(selectedId, eliminatedId);
     EXPECT_FALSE(game.Registry().try_get<Position>(eliminatedId));
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies + 2);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities + 6);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities + 6);
     manager->OnCameraTargetLost();
     EXPECT_EQ(manager->GetActiveWormId(), selectedId);
 }
@@ -1803,7 +1802,7 @@ TEST_F(GameLifetime, EliminatingLastTeamAndRepeatedCleanupLeaveNoTeamResources)
     KillActiveWorm();
     EXPECT_THROW(manager->GetActiveWormId(), std::logic_error);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_NO_THROW(manager->CleanUp());
     EXPECT_NO_THROW(manager->CleanUp());
     EXPECT_NO_THROW(manager->OnCameraTargetLost());
@@ -1814,12 +1813,12 @@ TEST_F(GameLifetime, FailedTeamConstructionRollsBackBodiesAndAuxiliaryEntities)
     auto& localRegistry = game.Context().registry;
     auto& incompleteWorld = localRegistry;
     ScopedComponentFailure<Follow> failure(localRegistry);
-    const auto available = EntityCount(incompleteWorld);
+    const auto entitiesBefore = LiveEntityCount(incompleteWorld);
     // Follow construction fails inside HealthBar, after the worm's body has been created.
     WormManager failing(game.ContextWith(incompleteWorld), *camera, *weapon);
     failing.Initialise();
     EXPECT_THROW(failing.CreateTeam(2), std::exception);
-    EXPECT_EQ(EntityCount(incompleteWorld), available);
+    EXPECT_EQ(LiveEntityCount(incompleteWorld), entitiesBefore);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
     EXPECT_THROW(failing.GetActiveWormId(), std::logic_error);
     failing.CleanUp();
@@ -1831,9 +1830,9 @@ TEST_F(GameLifetime, FailedTextureLoadCanBeCleanedWithoutLeakingAnEntity)
         "missing-lifetime-test-texture.png", 1, 0, 0, 10));
     EXPECT_THROW(game.Update(), SDL_Exception);
     EXPECT_EQ(game.PendingAddCount(), 0);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_NO_THROW(game.Update());
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
 }
 
 TEST_F(GameLifetime, PartialParticleInitializationCanBeCleanedWithoutLeakingEntities)
@@ -1841,15 +1840,15 @@ TEST_F(GameLifetime, PartialParticleInitializationCanBeCleanedWithoutLeakingEnti
     auto& localRegistry = game.Context().registry;
     auto& incompleteWorld = localRegistry;
     ScopedComponentFailure<Motion> failure(localRegistry);
-    const auto available = EntityCount(incompleteWorld);
+    const auto entitiesBefore = LiveEntityCount(incompleteWorld);
     ParticleSystem effect("blood.png", 1, 0, 0, 10);
     // Motion construction fails after creating the first particle and its Position.
     EXPECT_THROW(effect.Initialise(game.ContextWith(incompleteWorld)), std::exception);
     EXPECT_FALSE(effect.HasEntity());
-    EXPECT_EQ(EntityCount(incompleteWorld), available);
+    EXPECT_EQ(LiveEntityCount(incompleteWorld), entitiesBefore);
     EXPECT_NO_THROW(effect.CleanUp());
     EXPECT_NO_THROW(effect.CleanUp());
-    EXPECT_EQ(EntityCount(incompleteWorld), available);
+    EXPECT_EQ(LiveEntityCount(incompleteWorld), entitiesBefore);
 }
 
 TEST_F(GameLifetime, GameClosesWithActiveProjectileParticlesAndPendingObjects)
@@ -1867,7 +1866,7 @@ TEST_F(GameLifetime, GameClosesWithActiveProjectileParticlesAndPendingObjects)
     game.QueueAdd(std::make_unique<ParticleSystem>("blood.png", 1, 0, 0, 3));
     game.RequestDestroy(*projectilePointer);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies + 1);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities + 12);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities + 12);
 
     EXPECT_NO_THROW(game.Clean());
     EXPECT_FALSE(game.HasResources());
@@ -2301,14 +2300,14 @@ TEST_F(GameLifetime, FailedMapInitializationAutomaticallyReleasesResourcesAndSub
     auto& localRegistry = game.Context().registry;
     auto& incompleteWorld = localRegistry;
     ScopedComponentFailure<Sprite> failure(localRegistry);
-    const auto entities = EntityCount(incompleteWorld);
+    const auto entities = LiveEntityCount(incompleteWorld);
     const auto subscriptions = GameTestAccess::SubscriptionCount(game);
     Map map;
     // Sprite construction fails after loading the surface, texture and callback.
     EXPECT_THROW(map.Initialise(game.ContextWith(incompleteWorld)), std::exception);
     EXPECT_FALSE(map.HasEntity());
     EXPECT_FALSE(MapTestAccess::HasResources(map));
-    EXPECT_EQ(EntityCount(incompleteWorld), entities);
+    EXPECT_EQ(LiveEntityCount(incompleteWorld), entities);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
     EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
     EXPECT_NO_THROW(map.CleanUp());
@@ -2325,7 +2324,7 @@ TEST_F(GameLifetime, FailedProjectileInitializationAutomaticallyReleasesBodyAndS
     // ChangeTarget fails after creating the projectile's body and subscription.
     EXPECT_THROW(projectile.Initialise(game.Context()), std::logic_error);
     EXPECT_FALSE(projectile.HasEntity());
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
     EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
     EXPECT_NO_THROW(projectile.CleanUp());
@@ -2337,11 +2336,11 @@ TEST_F(GameLifetime, FailedCameraInitializationAutomaticallyReleasesItsEntity)
     auto& localRegistry = game.Context().registry;
     auto& incompleteWorld = localRegistry;
     ScopedComponentFailure<Position> failure(localRegistry);
-    const auto available = EntityCount(incompleteWorld);
+    const auto entitiesBefore = LiveEntityCount(incompleteWorld);
     Camera localCamera;
     EXPECT_THROW(localCamera.Initialise(game.ContextWith(incompleteWorld)), std::exception);
     EXPECT_FALSE(localCamera.HasEntity());
-    EXPECT_EQ(EntityCount(incompleteWorld), available);
+    EXPECT_EQ(LiveEntityCount(incompleteWorld), entitiesBefore);
     EXPECT_NO_THROW(localCamera.CleanUp());
     EXPECT_NO_THROW(localCamera.Update());
 }
@@ -2353,7 +2352,7 @@ TEST_F(GameLifetime, FailedWeaponTextureLoadAutomaticallyReleasesItsEntity)
     ResourceManager resources(game.Renderer(), assets.Directory(), game.AudioOutput().Native());
     EXPECT_THROW(localWeapon.Initialise(game.ContextWith(resources)), SDL_Exception);
     EXPECT_FALSE(localWeapon.HasEntity());
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_NO_THROW(localWeapon.CleanUp());
     EXPECT_NO_THROW(localWeapon.Update());
     EXPECT_NO_THROW(localWeapon.Render());
@@ -2440,7 +2439,7 @@ TEST_F(GameLifetime, CleanedHealthBarDoesNotReleaseBorrowedTexture)
     EXPECT_NO_THROW(bar.Render());
     EXPECT_NO_THROW(bar.TakeDamage(10));
     EXPECT_THROW(bar.getCurrentHp(), std::logic_error);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
 }
 
 TEST_F(GameLifetime, RemovingWormPreservesSharedHealthTextureAndCleanedWormCanBeRendered)
@@ -2478,7 +2477,7 @@ TEST_F(GameLifetime, WeaponAndProjectileCleanupPreserveBorrowedTexture)
     EXPECT_NO_THROW(projectile.Update());
     EXPECT_NO_THROW(localWeapon.CleanUp());
     EXPECT_NO_THROW(projectile.CleanUp());
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
 }
 
@@ -2500,7 +2499,7 @@ TEST_F(GameLifetime, WormsShareSpriteAndTeamRemovalPreservesCachedDeathSound)
     team.reset();
     EXPECT_GT(game.AudioOutput().PlayingSounds(), 0);
     EXPECT_EQ(game.Assets().GetTexture("worms.png"), sprite);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
 }
 
 TEST_F(GameLifetime, ParticleEffectsShareTextureAndCleanupPreservesOtherParticles)
@@ -2519,7 +2518,7 @@ TEST_F(GameLifetime, ParticleEffectsShareTextureAndCleanupPreservesOtherParticle
     EXPECT_EQ(SDL_GetTextureSize(texture, nullptr, nullptr), true);
     second.CleanUp();
     EXPECT_EQ(game.Assets().GetTexture("blood.png"), texture);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
 }
 
 TEST_F(GameLifetime, WeaponManagerDestructionAndWeaponCleanupPreserveProjectileAssets)
@@ -2542,7 +2541,7 @@ TEST_F(GameLifetime, WeaponManagerDestructionAndWeaponCleanupPreserveProjectileA
     EXPECT_EQ(SDL_GetTextureSize(grenade, nullptr, nullptr), true);
     EXPECT_EQ(SDL_GetTextureSize(powerBar, nullptr, nullptr), true);
     projectile.CleanUp();
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
 }
 
@@ -2600,7 +2599,7 @@ TEST_F(GameLifetime, RepeatedObjectLifecyclesRestoreEntitiesBodiesAndSubscriptio
         EXPECT_EQ(MapTestAccess::OwnedResources(map), 0);
         EXPECT_NO_THROW(map.CleanUp());
 
-        EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+        EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
     }
@@ -2638,7 +2637,7 @@ TEST_F(GameLifetime, ExpiredParticlesAreRemovedThroughTheGameQueueAndRestoreCoun
         ASSERT_TRUE(handle);
         EXPECT_EQ(ParticleSystemTestAccess::ParticleCount(*pointer), 4);
         EXPECT_EQ(ParticleSystemTestAccess::AssetReferences(*pointer), 1);
-        EXPECT_EQ(EntityCount(game.Registry()), initialEntities + 5);
+        EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities + 5);
         {
             ScopedDeltaTime expire(6);
             pointer->Update();
@@ -2650,7 +2649,7 @@ TEST_F(GameLifetime, ExpiredParticlesAreRemovedThroughTheGameQueueAndRestoreCoun
         EXPECT_EQ(game.Objects().size(), active);
         EXPECT_TRUE(game.PendingAddCount() == 0);
         EXPECT_TRUE(game.PendingRemovalCount() == 0);
-        EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+        EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
     }
@@ -2677,7 +2676,7 @@ TEST_F(GameLifetime, ExplosionAndParticleExpiryRestoreCountsAcrossRepeatedGameUp
         EXPECT_FALSE(IsValid(game.Registry(), *handle));
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
-        EXPECT_EQ(EntityCount(game.Registry()), initialEntities + 101);
+        EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities + 101);
         for (const auto& object : game.Objects())
             if (auto* particles = dynamic_cast<ParticleSystem*>(object.get()))
             {
@@ -2688,7 +2687,7 @@ TEST_F(GameLifetime, ExplosionAndParticleExpiryRestoreCountsAcrossRepeatedGameUp
         EXPECT_EQ(game.Objects().size(), active);
         EXPECT_TRUE(game.PendingAddCount() == 0);
         EXPECT_TRUE(game.PendingRemovalCount() == 0);
-        EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+        EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
     }
@@ -2704,12 +2703,12 @@ TEST_F(GameLifetime, RepeatedLastTeamDeathsAndTheirParticlesRestoreCounts)
     {
         SCOPED_TRACE(cycle);
         manager->CreateTeam(1);
-        EXPECT_EQ(EntityCount(game.Registry()), initialEntities + 3);
+        EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities + 3);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies + 1);
         EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions + 3);
         KillActiveWorm();
         EXPECT_THROW(manager->GetActiveWormId(), std::logic_error);
-        EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+        EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
         EXPECT_EQ(game.PendingAddCount(), 1);
@@ -2724,7 +2723,7 @@ TEST_F(GameLifetime, RepeatedLastTeamDeathsAndTheirParticlesRestoreCounts)
         EXPECT_EQ(game.Objects().size(), active);
         EXPECT_TRUE(game.PendingAddCount() == 0);
         EXPECT_TRUE(game.PendingRemovalCount() == 0);
-        EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+        EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
     }
@@ -2756,7 +2755,7 @@ TEST_F(GameLifetime, DuplicateDeletionRequestsCleanAndDestroyAnObjectOnlyOnce)
     EXPECT_EQ(destroyed, 1);
     EXPECT_FALSE(IsValid(game.Registry(), *handle));
     EXPECT_TRUE(game.PendingRemovalCount() == 0);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
 }
 
 TEST_F(GameLifetime, MapsOwnIndependentPixelsTexturesAndColliders)
@@ -2811,7 +2810,7 @@ TEST_F(GameLifetime, MapsOwnIndependentPixelsTexturesAndColliders)
     second.CleanUp();
     EXPECT_EQ(MapTestAccess::OwnedResources(first), 0);
     EXPECT_EQ(MapTestAccess::OwnedResources(second), 0);
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
 }
 
@@ -2856,7 +2855,7 @@ TEST_F(GameLifetime, GeneratedTeamTexturesOutliveWormsAndRemainIndependent)
     EXPECT_EQ(SDL_GetTextureSize(secondTexture, nullptr, nullptr), true);
     EXPECT_NO_THROW(secondTeam.RenderHealthBars());
     manager->CleanUp();
-    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+    EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
 }
 
@@ -2896,7 +2895,7 @@ TEST_F(GameLifetime, RepeatedTerrainDeformationReplacesResourcesWithoutGrowingCo
         EXPECT_EQ(MapTestAccess::OwnedResources(*map), 2);
         EXPECT_TRUE(SDL_GetTextureSize(game.Registry().get<Sprite>(map->GetId()).texture,
                                        nullptr, nullptr));
-        EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+        EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
     }
@@ -2910,7 +2909,7 @@ TEST_F(GameLifetime, RepeatedFullGameStartupAndShutdownReleaseSubsystemsAndSubsc
     {
         SCOPED_TRACE(cycle);
         game.InitTestWindow("Repeated lifetime test", 800, 600);
-        EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+        EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
         EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
         EXPECT_EQ(GameTestAccess::SubscriptionCount(game), subscriptions);
         auto particles = std::make_unique<ParticleSystem>("blood.png", 1, 0, 0, 4);
@@ -3059,10 +3058,10 @@ TEST_F(GameLifetime, PublicRelationsRejectForeignHandlesWithIdenticalEntityIds)
     EXPECT_FLOAT_EQ(WeaponTestAccess::Charge(*weapon), 0.5f);
 
     HealthBar rejected(foreign, *camera, 75, team->GetHealthBarTexture());
-    const auto entities = EntityCount(world);
+    const auto entities = LiveEntityCount(world);
     EXPECT_THROW(rejected.Initialise(game.Context()), std::invalid_argument);
     EXPECT_FALSE(rejected.HasEntity());
-    EXPECT_EQ(EntityCount(world), entities);
+    EXPECT_EQ(LiveEntityCount(world), entities);
     HealthBar accepted(local, *camera, 75, team->GetHealthBarTexture());
     ASSERT_NO_THROW(accepted.Initialise(game.Context()));
     ASSERT_TRUE(world.get<Follow>(accepted.GetId()).id);
@@ -3097,10 +3096,10 @@ TEST_F(GameLifetime, SettersAndHealthBarRejectAStaleHandleAfterSlotReuse)
     EXPECT_FALSE(WeaponTestAccess::HasParent(*weapon));
     EXPECT_FLOAT_EQ(WeaponTestAccess::Charge(*weapon), 0);
     HealthBar bar(stale, *camera, 75, team->GetHealthBarTexture());
-    const auto entities = EntityCount(world);
+    const auto entities = LiveEntityCount(world);
     EXPECT_THROW(bar.Initialise(game.Context()), std::invalid_argument);
     EXPECT_FALSE(bar.HasEntity());
-    EXPECT_EQ(EntityCount(world), entities);
+    EXPECT_EQ(LiveEntityCount(world), entities);
     focus.CleanUp();
     world.destroy(replacement);
 }
@@ -3136,10 +3135,10 @@ TEST_F(GameLifetime, RestartedSceneRejectsOldHandlesInRelationAndCollisionApis)
     EXPECT_FALSE(WeaponTestAccess::HasParent(*restartedWeapon));
     EXPECT_FLOAT_EQ(WeaponTestAccess::Charge(*restartedWeapon), 0.f);
     HealthBar bar(stale, *restartedCamera, 75, nullptr);
-    const auto entities = EntityCount(world);
+    const auto entities = LiveEntityCount(world);
     EXPECT_THROW(bar.Initialise(game.Context()), std::invalid_argument);
     EXPECT_FALSE(bar.HasEntity());
-    EXPECT_EQ(EntityCount(world), entities);
+    EXPECT_EQ(LiveEntityCount(world), entities);
     const auto subscriptions = game.Context().contacts.GetSubscriptionCount();
     EXPECT_THROW(game.Context().contacts.AddEvent(stale, BEGIN, [](b2Contact*) {}),
                  std::invalid_argument);
@@ -3239,7 +3238,7 @@ TEST_F(GameLifetime, SceneRejectsObjectsUsingDifferentAdapters)
         auto object = std::make_unique<GameObject>();
         object->Initialise(foreign);
         EXPECT_THROW(game.AddObject(std::move(object)), std::invalid_argument);
-        EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+        EXPECT_EQ(LiveEntityCount(game.Registry()), initialEntities);
     }
 }
 } // namespace

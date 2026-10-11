@@ -9,13 +9,14 @@ scene construction validates both renderer and mixer identities.
 
 ## Dependency Context
 
-`SceneContext` borrows the renderer, ECS world, physics world, `ObjectCommands`,
+`SceneContext` borrows the renderer, EnTT registry, physics world, `ObjectCommands`,
 collider factory, contact manager, ResourceManager, Renderer2D, Audio, and Input.
 It is not a resource owner or a global service locator. Objects store a copy of
 the context, so a temporary context value is safe; its referenced dependencies
 must still outlive the object. A null renderer is supported for headless tests.
 
-`ObjectCommands` exposes only queued addition and removal. Gameplay objects
+`ObjectCommands` exposes queued addition/removal and ownership transfer for safe
+retirement through `RetireObject`. Gameplay objects
 cannot access scene internals or perform immediate insertion through this API.
 Input is per-application and supplied explicitly. Frame timing and logging still use global services. Physics services are
 scene-owned: `ColliderFactory` is constructed with a world and contact manager,
@@ -28,7 +29,7 @@ contact manager supplied by the factory, never a global registry.
 | Owner | Owned resources | Borrowed dependencies |
 | --- | --- | --- |
 | `App` / `ResourceManager` | Platform and shared textures, sounds, music | None |
-| `GameScene` | ECS, physics world, collider factory, contact manager, camera, weapon, map, projectiles, particles, managers | App renderer, ResourceManager and adapters, music |
+| `GameScene` | EnTT registry, physics world, collider factory, contact manager, camera, weapon, map, projectiles, particles, managers | App renderer, ResourceManager and adapters, music |
 | `WormManager` | Teams | Context, camera, weapon |
 | `WormTeam` | Worms, health-bar texture | Cached death sound and Audio |
 | `Worm` | Health bar, collider wrapper | Cached sprite and jump sound, camera, team health-bar texture, context |
@@ -60,10 +61,11 @@ team update path without updating or rendering worms twice through the scene.
 Initialization failures clean partial resources; configuration is retained for
 retry. Owners call `CleanUp` before destroying initialized objects. Context
 access on an uninitialized or cleaned object is rejected. Scene insertion
-consumes its argument even on rejection and attempts cleanup before destruction.
+consumes its argument even on rejection. Rejected objects remain owned until
+cleanup can safely complete; failed cleanup is retained for a retry.
 
 Teams accept worms only between `Initialise` and `CleanUp`. Rejected initialized
-worms are cleaned before destruction. Cleanup retains the team's texture so the
+worms are retired through their scene and cleaned before destruction. Cleanup retains the team's texture so the
 same team can be initialized again. Worm spawn positions are explicit constructor
 configuration. Managers advance spawn slots only after an entire team succeeds
 and reset the slot counter during cleanup; failed initialization does not shift
@@ -74,13 +76,14 @@ Scene cleanup follows this order:
 1. Disable updates and reject new addition/removal requests; stop audio playback.
 2. Detach the Box2D contact listener and debug draw.
 3. Clean teams while the camera and weapon still exist.
-4. Clean the failed startup object, active objects, and pending additions.
+4. Clean the failed startup object, active objects, pending additions, and retired objects.
    Pending additions are discarded without being initialized.
 5. Consume deferred contact errors and clear collision subscriptions.
 6. Destroy the worm manager, clear removal requests, and destroy scene objects.
 7. Destroy weapon configurations and debug draw, detach music, and destroy the
    retained failed startup object, then the context, factory, physics world,
-   contact manager, and ECS world. The application-owned cache remains alive.
+   contact manager, and clear the EnTT registry. Retired objects remain owned
+   through physics-world destruction if their cleanup failed. The application-owned cache remains alive.
 
 Cached assets outlive their scene borrowers, and the renderer remains
 available throughout scene cleanup. A failed startup object remains owned until
@@ -105,8 +108,9 @@ on the same instance without an intermediate `Clean()` call. Rejecting a second
 initialization of an already running instance does not tear down that instance.
 
 The same `GameScene` can be initialized again after `CleanUp()`, using the same
-live renderer. Each initialization creates new worlds, managers, camera, weapon,
-and teams. Successful scene initialization resets shared input state and the
+live renderer. Each initialization creates a new physics world, managers, camera,
+weapon, and teams. The scene reuses its cleared EnTT registry, preserving entity
+version checks across restarts. Successful scene initialization resets shared input state and the
 frame clock; application cleanup resets them too. A failed scene initialization
 does not reset the input or frame clock of another running scene.
 
@@ -140,7 +144,8 @@ This is physics isolation, not full parallel-scene support: input, frame timing,
 the renderer, and their application-owned Audio are still shared. In particular, scene
 startup and cleanup can affect playback on that Audio, and successful scene
 startup resets shared input and frame timing. Application cleanup resets both
-as well. Scene lifecycle operations must be coordinated by the owner outside
-active update/render calls; cleanup is not an interrupt of an executing frame.
+as well. Scene cleanup requests during frames, physics callbacks, or guarded
+object cleanup are deferred to a safe boundary. Owners must not destroy/reset
+the scene from an executing callback; this contract is enforced before release.
 Independent Audio instances have independent mixers and stop operations, although
 App's global SDL lifecycle is still not designed for concurrent application instances.

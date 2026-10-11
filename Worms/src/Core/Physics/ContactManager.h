@@ -1,5 +1,5 @@
 #pragma once
-#include "ECS/ECS_Types.h"
+#include "Core/EntityHandle.h"
 #include <entt/entity/registry.hpp>
 #include <box2d/b2_contact.h>
 #include <box2d/b2_fixture.h>

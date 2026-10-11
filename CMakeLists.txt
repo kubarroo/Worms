@@ -12,7 +12,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(cmake/Dependencies.cmake)
 
-add_subdirectory(ECS)
 add_subdirectory(Worms)
 
 option(WORMS_BUILD_TESTS "Build application tests" OFF)

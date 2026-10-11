@@ -1,5 +1,5 @@
 #pragma once
-#include "ECS/ECS_Types.h"
+#include "Core/EntityHandle.h"
 #include <SDL3/SDL.h>
 #include <box2d/b2_body.h>
 #include <functional>

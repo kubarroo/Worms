@@ -1,12 +1,14 @@
 #pragma once
 #include <entt/entity/registry.hpp>
 #include <stdexcept>
-#include "ECS/ECS_Types.h"
+#include "Core/EntityHandle.h"
 #include <optional>
+#include <iterator>
 
-inline std::size_t EntityCount(const entt::registry& registry)
+inline std::size_t LiveEntityCount(const entt::registry& registry)
 {
-    return registry.storage<entt::entity>()->free_list();
+    const auto entities = registry.view<entt::entity>();
+    return static_cast<std::size_t>(std::distance(entities.begin(), entities.end()));
 }
 
 inline std::optional<EntityHandle> MakeHandle(const entt::registry& registry, entt::entity entity)

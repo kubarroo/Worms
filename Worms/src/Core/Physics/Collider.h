@@ -1,5 +1,5 @@
 #pragma once
-#include "ECS/ECS_Types.h"
+#include "Core/EntityHandle.h"
 #include "Core/Physics/ContactManager.h"
 #include "Game/Components.h"
 #include "Game/Tags.h"

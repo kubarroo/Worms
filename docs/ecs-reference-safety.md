@@ -2,7 +2,9 @@
 
 ## Scope
 
-These rules apply to the current ECS and must be preserved during migration to EnTT. They complement the [ownership and cleanup contract](ownership-and-cleanup.md).
+These rules apply to the scene-owned EnTT registry. See [Scene Lifetimes](Architecture.md)
+for the current ownership and cleanup contract. The custom ECS has been removed;
+entity types and owner-aware handles are defined in `Core/EntityHandle.h`.
 
 ## Component References
 
@@ -15,21 +17,23 @@ These rules apply to the current ECS and must be preserved during migration to E
 
 ## Observer Handles
 
-- `EntityId` is a slot number, not a persistent entity identity. Number `0` is a valid identifier, and a released number may be assigned again.
-- Long-lived references to other objects' entities use `EntityHandle`, obtained through `World::GetHandle()`. Represent a missing target with an empty `std::optional`, not number `0`.
-- Check `World::IsAlive(handle)` before using a handle. The check includes the slot number, generation, and handle owner.
-- Entity validity alone does not guarantee the presence of `Position` or another component. After checking the handle, retrieve the required component through `TryGetComponent()`.
+- `EntityId` is `entt::entity` and includes a slot and version. Entity zero is valid; `entt::null` represents an invalid ID. Reused slots have a new version.
+- Long-lived references to other objects' entities use `EntityHandle`, obtained through `GameObject::GetHandle()`. Represent a missing target with an empty `std::optional`.
+- Check `IsValid(registry, handle)` before using a handle. It checks registry ownership and `registry.valid(handle.id)`. EnTT validity alone does not reject an ID from another scene.
+- Entity validity alone does not guarantee the presence of `Position` or another component. After checking the handle, retrieve the required component through `registry.try_get<T>()`.
 - Losing the entity or a required component clears the target. An observer does not automatically adopt a new entity under the same number or resume tracking when a component is added again. The target must be set explicitly.
 - When the weapon loses its parent, it resets its charge and neither fires nor renders the charge bar. Setting the same valid parent again preserves the charge; changing the parent resets it.
-- Handles and objects storing a borrowed `World*` must not outlive their world. They must be detached or destroyed before `World` is destroyed. A handle does not extend the world's lifetime, and its `owner` field is not intended to be dereferenced.
+- Handles and objects storing a borrowed `SceneContext` must not outlive its services. Detach or destroy them before the scene's registry is destroyed. A handle does not extend registry lifetime, and its `owner` field is used only for identity comparison.
 - Entity owners may continue to use `EntityId` within their own lifetimes. Do not remove their entities independently of their owners while leaving them with stale identifiers.
 
 ## Particle Callbacks And System Iteration
 
-- Particle behavior functions called by `ParticleUpdater` compute and return values. They do not directly remove entities or add or remove components during system iteration.
-- During iteration, a system uses component references and its subscribed entity set. Direct structural ECS changes from a callback may invalidate both kinds of access.
-- If a callback needs to request structural changes, it records a command in a queue. Execute commands after iteration has finished, without retaining component references.
-- A deferred component-change queue is not currently a general ECS mechanism. Before adding such behavior to callbacks, implement it and add tests, including removal of the current entity and reuse of its number.
+- Systems use `registry.view<...>()`, not persistent subscription sets. Their update/render order is explicit in `GameScene`.
+- `ParticleUpdater` snapshots matching entity IDs and callable handles before invocation, then rechecks entity validity and component membership and reacquires writable components. Added particles wait for a later update; reused slots are not mistaken for old entities.
+- `ParticleCharacteristic` retains the callable through shared ownership. Mutable callback state survives updates and storage compaction; copies share that state. Removing or replacing the current component does not destroy the executing callable.
+- Other systems do not promise arbitrary structural mutation during view iteration. Request gameplay object changes through `QueueAdd`, `RequestDestroy`, or `RetireObject`; execute them at safe boundaries.
+- Physical object removal must use its cleanup process, not raw `registry.destroy()`. Object initialization/cleanup and collider creation reject a locked Box2D world.
+- Scene cleanup requested during a frame, physics step, or guarded object cleanup is deferred. Never destroy/reset the scene itself from an executing callback, including cleanup callbacks.
 
 ## Change Verification
 
