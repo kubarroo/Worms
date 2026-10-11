@@ -685,6 +685,82 @@ TEST_F(GameLifetime, FailedSceneInitializationRollsBackAndCanBeRetried)
     EXPECT_NO_THROW(scene.CleanUp());
 }
 
+TEST_F(GameLifetime, ScenePreservesSystemOrderAndSynchronizesBeforePhysicsStep)
+{
+    ScopedDeltaTime deltaTime(1.0 / 60.0);
+    auto& registry = game.Registry();
+    b2BodyDef definition;
+    definition.type = b2_kinematicBody;
+    definition.position.Set(1000, 1000);
+    definition.angle = 0.25f;
+    definition.linearVelocity.Set(3, 4);
+    definition.angularVelocity = 0.5f;
+    auto* body = game.Physics().CreateBody(&definition);
+    b2CircleShape shape;
+    shape.m_radius = 0.1f;
+    body->CreateFixture(&shape, 0);
+    const auto physical = registry.create();
+    registry.emplace<Position>(physical, Position{-50, -60});
+    registry.emplace<Motion>(physical, Motion{11, 13});
+    registry.emplace<RigidBody>(physical, RigidBody{body});
+    registry.emplace<Rotation>(physical, Rotation{-45});
+    const auto follower = registry.create();
+    registry.emplace<Position>(follower, Position{-10, -20});
+    registry.emplace<Follow>(follower, Follow{EntityHandle{physical, &registry}, 7, -9});
+    const auto particle = registry.create();
+    registry.emplace<Position>(particle, Position{10, 20});
+    registry.emplace<Motion>(particle, Motion{2, 3});
+    registry.emplace<Scale>(particle, Scale{8});
+    registry.emplace<Sprite>(particle);
+    b2Vec2 beforeStep;
+    float expectedParticleX = 10, expectedParticleY = 20;
+    std::vector<std::string> phases;
+    registry.emplace<Particle>(particle, Particle{nullptr, nullptr,
+        [&](float x, float y)
+        {
+            phases.push_back("velocity");
+            // These snapshots distinguish the order of all four ECS updates.
+            EXPECT_FLOAT_EQ(registry.get<Position>(particle).x, expectedParticleX);
+            EXPECT_FLOAT_EQ(registry.get<Position>(particle).y, expectedParticleY);
+            EXPECT_FLOAT_EQ(registry.get<Position>(physical).x, beforeStep.x);
+            EXPECT_FLOAT_EQ(registry.get<Position>(follower).x, beforeStep.x + 7);
+            EXPECT_FLOAT_EQ(registry.get<Position>(follower).y, beforeStep.y - 9);
+            EXPECT_FLOAT_EQ(body->GetPosition().x, beforeStep.x);
+            return std::pair{x * 2, y * 2};
+        },
+        [&](float size) { phases.push_back("size"); return size / 2; }});
+    auto stats = std::make_shared<QueueProbeStats>();
+    auto observer = std::make_unique<QueueProbe>(stats);
+    observer->onUpdate = [&](QueueProbe&)
+    {
+        phases.push_back("object");
+        EXPECT_GT(body->GetPosition().x, beforeStep.x);
+        EXPECT_GT(body->GetPosition().y, beforeStep.y);
+    };
+    game.AddObject(std::move(observer));
+    for (int frame = 0; frame < 2; ++frame)
+    {
+        SCOPED_TRACE(frame);
+        phases.clear();
+        beforeStep = body->GetPosition();
+        const float beforeAngle = body->GetAngle();
+        const auto motion = registry.get<Motion>(particle);
+        expectedParticleX += motion.v_x;
+        expectedParticleY += motion.v_y;
+        ASSERT_NO_THROW(game.Update());
+        EXPECT_EQ(phases, (std::vector<std::string>{"velocity", "size", "object"}));
+        EXPECT_FLOAT_EQ(registry.get<Position>(physical).x, beforeStep.x);
+        EXPECT_FLOAT_EQ(registry.get<Position>(physical).y, beforeStep.y);
+        EXPECT_NEAR(registry.get<Rotation>(physical).degree,
+                    beforeAngle * 180 / static_cast<float>(std::numbers::pi), 0.0001f);
+        EXPECT_FLOAT_EQ(registry.get<Motion>(particle).v_x, motion.v_x * 2);
+        EXPECT_FLOAT_EQ(registry.get<Scale>(particle).size, frame == 0 ? 4.f : 2.f);
+    }
+    EXPECT_EQ(stats->updated, 2);
+    game.Scene().CleanUp();
+    EXPECT_EQ(stats->cleaned, 1);
+}
+
 TEST_F(GameLifetime, SameSceneRestartsWithPendingEffectsAndResetsSessionState)
 {
     auto& scene = game.Scene();

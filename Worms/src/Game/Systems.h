@@ -10,7 +10,7 @@ class Movement
 public:
     static void Update(entt::registry& registry)
     {
-        for (auto [entity, position, motion] : registry.view<Position, Motion>().each())
+        for (auto [entity, position, motion] : registry.view<Position, const Motion>().each())
         {
             position.x += motion.v_x;
             position.y += motion.v_y;
@@ -23,7 +23,7 @@ class PhysicsSynchronizer
 public:
     static void Update(entt::registry& registry)
     {
-        for (auto [entity, position, rigidBody] : registry.view<Position, RigidBody>().each())
+        for (auto [entity, position, rigidBody] : registry.view<Position, const RigidBody>().each())
         {
             if (!rigidBody.body) continue;
             position.x = rigidBody.body->GetPosition().x;
@@ -48,7 +48,7 @@ public:
                 follow.id.reset();
                 continue;
             }
-            const auto* target = registry.try_get<Position>(follow.id->id);
+            const auto* target = registry.try_get<const Position>(follow.id->id);
             if (!target)
             {
                 follow.id.reset();
@@ -67,7 +67,7 @@ public:
     static void Update(entt::registry& registry)
     {
         for (auto [entity, particle, position, scale, sprite, motion] :
-             registry.view<Particle, Position, Scale, Sprite, Motion>().each())
+             registry.view<const Particle, const Position, Scale, const Sprite, Motion>().each())
         {
             if (particle.vel_characteristic)
             {
@@ -98,7 +98,7 @@ public:
         {
             if (!sprite.texture) continue;
             const auto size = renderer.TextureSize(sprite.texture);
-            const auto* scale = registry.try_get<Scale>(entity);
+            const auto* scale = registry.try_get<const Scale>(entity);
             const float factor = scale ? scale->size : 1.f;
             RenderRect destination;
             destination.x = static_cast<int>(400 + 100.0 * (position.x - camera.X()) -
@@ -107,7 +107,7 @@ public:
                                              size.y / 2 * factor);
             destination.w = static_cast<int>(size.x * factor);
             destination.h = static_cast<int>(size.y * factor);
-            const auto* angle = registry.try_get<Rotation>(entity);
+            const auto* angle = registry.try_get<const Rotation>(entity);
             renderer.DrawSprite(sprite.texture, destination, {}, angle ? -angle->degree : 0.0);
         }
     }

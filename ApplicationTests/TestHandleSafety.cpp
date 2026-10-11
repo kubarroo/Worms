@@ -12,6 +12,7 @@
 #include <box2d/b2_world.h>
 #include <gtest/gtest.h>
 #include <memory>
+#include <numbers>
 #include <type_traits>
 
 static_assert(std::is_default_constructible_v<GameObject>);
@@ -344,6 +345,138 @@ TEST(HandleSafety, ViewsUpdateMatchingComponentsAndRejectForeignFollowHandles)
     EXPECT_FLOAT_EQ(world.get<Position>(stationary).x, 7);
 }
 
+TEST(HandleSafety, MovementTracksAddedAndRemovedComponents)
+{
+    entt::registry registry;
+    const auto entity = registry.create();
+    registry.emplace<Position>(entity, Position{1, 2});
+    const auto motionOnly = registry.create();
+    registry.emplace<Motion>(motionOnly, Motion{9, 10});
+    Movement::Update(registry);
+    EXPECT_FLOAT_EQ(registry.get<Position>(entity).x, 1);
+    registry.emplace<Motion>(entity, Motion{3, -4});
+    Movement::Update(registry);
+    EXPECT_FLOAT_EQ(registry.get<Position>(entity).x, 4);
+    EXPECT_FLOAT_EQ(registry.get<Position>(entity).y, -2);
+    EXPECT_FLOAT_EQ(registry.get<Motion>(entity).v_x, 3);
+    registry.remove<Motion>(entity);
+    Movement::Update(registry);
+    EXPECT_FLOAT_EQ(registry.get<Position>(entity).x, 4);
+    registry.emplace<Motion>(entity, Motion{2, 1});
+    registry.remove<Position>(entity);
+    Movement::Update(registry);
+    registry.emplace<Position>(entity, Position{10, 20});
+    Movement::Update(registry);
+    EXPECT_FLOAT_EQ(registry.get<Position>(entity).x, 12);
+    EXPECT_FLOAT_EQ(registry.get<Position>(entity).y, 21);
+    EXPECT_FALSE(registry.all_of<Position>(motionOnly));
+}
+
+TEST(HandleSafety, PhysicsSynchronizerCopiesTransformsAndTracksViewMembership)
+{
+    entt::registry registry;
+    b2World physics({0, 0});
+    b2BodyDef definition;
+    definition.position.Set(3, 4);
+    definition.angle = static_cast<float>(std::numbers::pi / 6);
+    auto* body = physics.CreateBody(&definition);
+    const auto entity = registry.create();
+    registry.emplace<Position>(entity, Position{-1, -2});
+    registry.emplace<Rotation>(entity, Rotation{-45});
+    const auto bodyOnly = registry.create();
+    registry.emplace<RigidBody>(bodyOnly, RigidBody{body});
+    const auto emptyBody = registry.create();
+    registry.emplace<Position>(emptyBody, Position{7, 8});
+    registry.emplace<Rotation>(emptyBody, Rotation{90});
+    registry.emplace<RigidBody>(emptyBody);
+    PhysicsSynchronizer::Update(registry);
+    EXPECT_FLOAT_EQ(registry.get<Position>(entity).x, -1);
+    registry.emplace<RigidBody>(entity, RigidBody{body});
+    PhysicsSynchronizer::Update(registry);
+    EXPECT_FLOAT_EQ(registry.get<Position>(entity).x, 3);
+    EXPECT_FLOAT_EQ(registry.get<Position>(entity).y, 4);
+    EXPECT_NEAR(registry.get<Rotation>(entity).degree, 30, 0.0001f);
+    EXPECT_FLOAT_EQ(registry.get<Position>(emptyBody).x, 7);
+    EXPECT_FLOAT_EQ(registry.get<Rotation>(emptyBody).degree, 90);
+    EXPECT_FALSE(registry.all_of<Position>(bodyOnly));
+
+    registry.remove<Rotation>(entity);
+    body->SetTransform({9, 10}, static_cast<float>(-std::numbers::pi / 2));
+    PhysicsSynchronizer::Update(registry);
+    EXPECT_FLOAT_EQ(registry.get<Position>(entity).x, 9);
+    EXPECT_FALSE(registry.all_of<Rotation>(entity));
+    registry.emplace<Rotation>(entity, Rotation{0});
+    registry.remove<RigidBody>(entity);
+    body->SetTransform({11, 12}, static_cast<float>(std::numbers::pi));
+    PhysicsSynchronizer::Update(registry);
+    EXPECT_FLOAT_EQ(registry.get<Position>(entity).x, 9);
+    EXPECT_FLOAT_EQ(registry.get<Rotation>(entity).degree, 0);
+    registry.emplace<RigidBody>(entity, RigidBody{body});
+    PhysicsSynchronizer::Update(registry);
+    EXPECT_FLOAT_EQ(registry.get<Position>(entity).x, 11);
+    EXPECT_NEAR(registry.get<Rotation>(entity).degree, 180, 0.0001f);
+}
+
+TEST(HandleSafety, ParticleUpdaterRequiresAllComponentsAndRejoinsAfterInsertion)
+{
+    const auto exercise = []<typename Missing>()
+    {
+        entt::registry registry;
+        int velocityCalls = 0, sizeCalls = 0;
+        const auto entity = registry.create();
+        registry.emplace<Position>(entity, Position{1, 2});
+        registry.emplace<Motion>(entity, Motion{2, 3});
+        registry.emplace<Scale>(entity, Scale{8});
+        registry.emplace<Sprite>(entity);
+        registry.emplace<Particle>(entity, Particle{nullptr, nullptr,
+            [&](float x, float y) { ++velocityCalls; return std::pair{x * 2, y * 2}; },
+            [&](float size) { ++sizeCalls; return size / 2; }});
+        const auto removed = registry.get<Missing>(entity);
+        registry.remove<Missing>(entity);
+        ParticleUpdater::Update(registry);
+        EXPECT_EQ(velocityCalls, 0);
+        EXPECT_EQ(sizeCalls, 0);
+        registry.emplace<Missing>(entity, removed);
+        ParticleUpdater::Update(registry);
+        EXPECT_EQ(velocityCalls, 1);
+        EXPECT_EQ(sizeCalls, 1);
+        EXPECT_FLOAT_EQ(registry.get<Motion>(entity).v_x, 4);
+        EXPECT_FLOAT_EQ(registry.get<Motion>(entity).v_y, 6);
+        EXPECT_FLOAT_EQ(registry.get<Scale>(entity).size, 4);
+        EXPECT_FLOAT_EQ(registry.get<Position>(entity).x, 1);
+        EXPECT_EQ(registry.get<Sprite>(entity).texture, nullptr);
+    };
+    exercise.operator()<Particle>();
+    exercise.operator()<Position>();
+    exercise.operator()<Motion>();
+    exercise.operator()<Scale>();
+    exercise.operator()<Sprite>();
+}
+
+TEST(HandleSafety, TargetSystemTracksFollowerMembershipAndPreservesOffsets)
+{
+    entt::registry registry;
+    const auto target = registry.create();
+    registry.emplace<Position>(target, Position{10, 20});
+    const auto follower = registry.create();
+    registry.emplace<Follow>(follower, Follow{EntityHandle{target, &registry}, 2, -3});
+    TargetSystem::Update(registry);
+    EXPECT_TRUE(registry.get<Follow>(follower).id);
+    registry.emplace<Position>(follower, Position{0, 0});
+    TargetSystem::Update(registry);
+    EXPECT_FLOAT_EQ(registry.get<Position>(follower).x, 12);
+    EXPECT_FLOAT_EQ(registry.get<Position>(follower).y, 17);
+    const auto follow = registry.get<Follow>(follower);
+    registry.remove<Follow>(follower);
+    registry.get<Position>(target) = {30, 40};
+    TargetSystem::Update(registry);
+    EXPECT_FLOAT_EQ(registry.get<Position>(follower).x, 12);
+    registry.emplace<Follow>(follower, follow);
+    TargetSystem::Update(registry);
+    EXPECT_FLOAT_EQ(registry.get<Position>(follower).x, 32);
+    EXPECT_FLOAT_EQ(registry.get<Position>(follower).y, 37);
+}
+
 TEST(HandleSafety, SpriteRendererUsesExplicitOrderAcrossCompactionSlotReuseAndLayerChanges)
 {
     ScopedSdlRuntime runtime;
@@ -417,5 +550,14 @@ TEST(HandleSafety, SpriteRendererUsesExplicitOrderAcrossCompactionSlotReuseAndLa
     EXPECT_EQ(drawPixel().r, 255);
     world.remove<RenderOrder>(back);
     EXPECT_EQ(drawPixel().b, 255);
+    world.emplace<RenderOrder>(back, NextRenderOrder(registry, RenderLayer::Effects));
+    EXPECT_EQ(drawPixel().r, 255);
+    world.remove<Sprite>(back);
+    EXPECT_EQ(drawPixel().b, 255);
+    world.emplace<Sprite>(back, Sprite{red.get()});
+    world.remove<Position>(back);
+    EXPECT_EQ(drawPixel().b, 255);
+    world.emplace<Position>(back, Position{2, -1});
+    EXPECT_EQ(drawPixel().r, 255);
     camera.CleanUp();
 }
