@@ -3,7 +3,7 @@
 ## Automated Coverage
 
 `ApplicationTests/TestResourceManager.cpp` verifies cache reuse, normalized and
-absolute paths, missing-file diagnostics and retry, platform restart, cache retention
+absolute paths, missing/corrupt-file diagnostics and retry, platform restart, cache retention
 across scene restart, renderer mismatch rejection, and shutdown with cached audio.
 
 Tests in `ApplicationTests/TestGameLifetime.cpp` use SDL `dummy` drivers and the `software` renderer. They verify logic and resources without an interactive gameplay window.
@@ -25,6 +25,9 @@ Tests in `ApplicationTests/TestGameLifetime.cpp` use SDL `dummy` drivers and the
 | Full startup rollback | Missing worm, weapon, map, or music assets release both gameplay and platform resources; retry succeeds without explicit cleanup |
 | Platform rollback and RAII | Renderer/audio initialization failure rolls back immediately; retry and destruction without explicit cleanup release the platform |
 | Shutdown dependency order | Objects observe detached physics callbacks but live worlds, renderer, audio device, and shared weapon texture; addition/removal requests are rejected during cleanup |
+| Shutdown with active audio | Looping music and sound are stopped before object cleanup; cache and ImGui remain available until scene borrowers are destroyed |
+| Recreated scenes and audio | Three separately constructed scenes reuse the same texture, sound and music; each destruction stops playback without closing the platform; playback works again before final shutdown |
+| Corrupt assets | Image, sound and music failures include the filename, repeated attempts fail without caching an invalid asset, and replacing the file permits loading and deduplicated reuse |
 | Session state | Held input and pending weapon change are reset; the first frame after resetting the frame clock has zero elapsed time |
 
 Repeated cycles compare available entity slots, Box2D bodies, subscriptions, and
@@ -131,3 +134,31 @@ Headless tests do not replace verification with normal audio and graphics driver
 - Lifecycle operations are coordinated outside active update/render calls.
   Scene restart retains the renderer and platform, but input, frame timing,
   and audio remain shared services rather than fully isolated per-scene state.
+
+## Phase-3 Step-6 Verification
+
+- Verified on 2026-10-11 using a separate MSVC Debug-runtime test executable at
+  build/debug/adapter-verification/full_tests.exe. The local build used /Z7 and
+  the existing dependency libraries; project presets were not changed.
+- The full suite passed **148/148 tests**, including corrupt-file retry,
+  deduplication across recreated scenes, and shutdown with looping music/sounds.
+  Output is saved at build/debug/phase3-step6-tests.log.
+- With WORMS_CRT_DIAGNOSTICS=1, the complete suite passed **three shuffled
+  iterations of 148 tests** (444 executions), starting with seed 12345.
+  build/debug/phase3-step6-crt.log confirms diagnostics were enabled, no heap
+  integrity failures, no remaining initialized SDL subsystems, and no exit-time
+  CRT leak report. This does not cover all driver/GPU memory or replace ASan.
+- The corrupt-sound test initially found an open input file after decode failure:
+  SDL_mixer's unsupported-format path did not close its owned SDL_RWops.
+  Sound now retains stream ownership in local RAII and calls Mix_LoadWAV_RW
+  with freesrc=0. The repaired-file retry and all diagnostics passed after this fix.
+- The shutdown audit confirmed the existing order: stop playback, destroy scene,
+  release ResourceManager cache, shut down ImGui, close audio, release the
+  rendering adapter/native renderer/window, and finally SDL_Quit. The scene
+  cleanup probe checks stopped playback while cache, worlds, renderer, ImGui,
+  and the audio device are still alive; post-cleanup checks confirm shutdown
+  and repeated Clean remains safe.
+- No ASan-instrumented build or interactive normal-driver check was performed.
+  Remaining manual checks: close the window during music and a weapon sound,
+  close with projectiles/particles active, and verify ordinary playback and
+  rendering after restart. Headless success is not a claim of complete leak freedom.

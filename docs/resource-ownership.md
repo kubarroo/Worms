@@ -67,6 +67,9 @@ texture loading then throws. Audio loading requires an open mixer device.
 GetTexture, GetSound and GetMusic load on first access and return borrowed assets.
 Failed loads throw SDL_Exception with the filename and library error; no failed entry
 is cached. Sound and Music constructors also report errors this way.
+Sound owns its input SDL_RWops in a local RAII handle and invokes Mix_LoadWAV_RW
+without transferring stream ownership. This closes the file on both success and
+decode failure, including the mixer's unsupported-format error path.
 
 App::SetAssetRoot configures an explicit base directory before initialization. The
 default is the working directory at initialization for existing launch workflows.

@@ -792,6 +792,12 @@ TEST_F(GameLifetime, RejectedGameInitializationPreservesRunningSession)
 
 TEST_F(GameLifetime, CleanupKeepsWorldsRendererAndSharedTexturesAliveForObjects)
 {
+    auto& sound = game.Assets().GetSound("jump.wav");
+    auto& music = game.Assets().GetMusic("Rick_Roll.ogg");
+    ASSERT_GE(game.AudioOutput().Play(sound, -1), 0);
+    ASSERT_NO_THROW(game.AudioOutput().Play(music, -1));
+    ASSERT_GT(Mix_Playing(-1), 0);
+    ASSERT_EQ(Mix_PlayingMusic(), 1);
     auto* texture = game.Registry().GetComponent<Sprite>(weapon->GetId()).texture;
     ASSERT_NE(texture, nullptr);
     auto& scene = game.Scene();
@@ -806,6 +812,12 @@ TEST_F(GameLifetime, CleanupKeepsWorldsRendererAndSharedTexturesAliveForObjects)
         EXPECT_EQ(SDL_QueryTexture(texture, nullptr, nullptr, nullptr, nullptr), 0);
         EXPECT_EQ(SDL_RenderClear(context.renderer), 0);
         EXPECT_NE(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+        EXPECT_EQ(Mix_Playing(-1), 0);
+        EXPECT_EQ(Mix_PlayingMusic(), 0);
+        EXPECT_EQ(&context.resources.GetSound("jump.wav"), &sound);
+        EXPECT_EQ(&context.resources.GetMusic("Rick_Roll.ogg"), &music);
+        EXPECT_NE(ImGui::GetCurrentContext(), nullptr);
+        EXPECT_NE(SDL_WasInit(SDL_INIT_VIDEO), 0u);
         auto id = context.world.CreateEntity();
         context.world.DestroyEntity(id);
         EXPECT_THROW(object.Owner().QueueAdd(std::make_unique<QueueProbe>(pendingStats)),
@@ -821,6 +833,11 @@ TEST_F(GameLifetime, CleanupKeepsWorldsRendererAndSharedTexturesAliveForObjects)
     EXPECT_EQ(pendingStats->cleaned, 2);
     EXPECT_EQ(pendingStats->destroyed, 2);
     EXPECT_FALSE(game.HasResources());
+    EXPECT_THROW(game.Assets(), std::logic_error);
+    EXPECT_EQ(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(ImGui::GetCurrentContext(), nullptr);
+    EXPECT_EQ(SDL_WasInit(0), 0u);
+    EXPECT_NO_THROW(game.Clean());
 }
 
 TEST_F(GameLifetime, GameplayConstructorsDoNotAllocateEntitiesBodiesOrSubscriptions)

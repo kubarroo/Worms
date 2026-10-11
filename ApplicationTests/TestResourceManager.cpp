@@ -3,6 +3,7 @@
 #include "Game/GameScene.h"
 #include <gtest/gtest.h>
 #include <chrono>
+#include <fstream>
 #include <optional>
 #include <stdexcept>
 
@@ -97,6 +98,88 @@ TEST_F(ResourceCache, FailedLoadsReportFilenameAndCanBeRetried)
         else if (missing.extension() == ".wav") EXPECT_NO_THROW(cache.GetSound(missing));
         else EXPECT_NO_THROW(cache.GetMusic(missing));
     }
+}
+
+TEST_F(ResourceCache, CorruptFilesReportFilenameAndDoNotPoisonCache)
+{
+    auto& cache = app.Resources();
+    for (const auto* asset : {"worms.png", "jump.wav", "Rick_Roll.ogg"})
+    {
+        SCOPED_TRACE(asset);
+        const auto path = temporary / asset;
+        {
+            std::ofstream file(path, std::ios::binary);
+            ASSERT_TRUE(file.is_open());
+            file << "Not a valid image or audio file";
+            ASSERT_TRUE(file.good());
+        }
+        const auto load = [&]
+        {
+            if (path.extension() == ".png") cache.GetTexture(path);
+            else if (path.extension() == ".wav") cache.GetSound(path);
+            else cache.GetMusic(path);
+        };
+        for (int attempt = 0; attempt < 2; ++attempt)
+        {
+            try
+            {
+                load();
+                FAIL() << "Corrupt asset was accepted";
+            }
+            catch (const SDL_Exception& error)
+            {
+                EXPECT_NE(std::string(error.what()).find(path.string()), std::string::npos);
+            }
+        }
+        std::filesystem::copy_file(root / asset, path,
+                                   std::filesystem::copy_options::overwrite_existing);
+        ASSERT_NO_THROW(load());
+        if (path.extension() == ".png")
+            EXPECT_EQ(cache.GetTexture(path), cache.GetTexture(temporary / "." / asset));
+        else if (path.extension() == ".wav")
+            EXPECT_EQ(&cache.GetSound(path), &cache.GetSound(temporary / "." / asset));
+        else
+            EXPECT_EQ(&cache.GetMusic(path), &cache.GetMusic(temporary / "." / asset));
+    }
+}
+
+TEST_F(ResourceCache, RecreatedScenesReuseCacheAndStopAudioBeforePlatformShutdown)
+{
+    auto& cache = app.Resources();
+    auto* texture = cache.GetTexture("worms.png");
+    auto& sound = cache.GetSound("jump.wav");
+    auto& music = cache.GetMusic("Rick_Roll.ogg");
+    for (int cycle = 0; cycle < 3; ++cycle)
+    {
+        SCOPED_TRACE(cycle);
+        {
+            GameScene scene(app.Renderer(), cache, app.Graphics(), app.AudioOutput(), app.Inputs());
+            ASSERT_NO_THROW(scene.Initialize());
+            EXPECT_EQ(texture, scene.Context().resources.GetTexture("./worms.png"));
+            EXPECT_EQ(&sound, &scene.Context().resources.GetSound("jump.wav"));
+            EXPECT_EQ(&music, &scene.Context().resources.GetMusic("Rick_Roll.ogg"));
+            ASSERT_GE(app.AudioOutput().Play(sound, -1), 0);
+            ASSERT_NO_THROW(app.AudioOutput().Play(music, -1));
+            EXPECT_GT(Mix_Playing(-1), 0);
+            EXPECT_EQ(Mix_PlayingMusic(), 1);
+        }
+        EXPECT_EQ(Mix_Playing(-1), 0);
+        EXPECT_EQ(Mix_PlayingMusic(), 0);
+        EXPECT_NE(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+        EXPECT_NE(SDL_WasInit(SDL_INIT_VIDEO), 0u);
+        EXPECT_NE(ImGui::GetCurrentContext(), nullptr);
+        EXPECT_EQ(texture, cache.GetTexture("worms.png"));
+        EXPECT_EQ(&sound, &cache.GetSound("jump.wav"));
+        EXPECT_EQ(&music, &cache.GetMusic("Rick_Roll.ogg"));
+    }
+    ASSERT_GE(app.AudioOutput().Play(sound, -1), 0);
+    ASSERT_NO_THROW(app.AudioOutput().Play(music, -1));
+    EXPECT_NO_THROW(app.Clean());
+    EXPECT_THROW(app.Resources(), std::logic_error);
+    EXPECT_EQ(Mix_QuerySpec(nullptr, nullptr, nullptr), 0);
+    EXPECT_EQ(ImGui::GetCurrentContext(), nullptr);
+    EXPECT_EQ(SDL_WasInit(0), 0u);
+    EXPECT_NO_THROW(app.Clean());
 }
 
 TEST_F(ResourceCache, RejectsEmptyPathsAndChangingLiveConfiguration)
