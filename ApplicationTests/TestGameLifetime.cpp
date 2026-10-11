@@ -29,6 +29,8 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <cstdlib>
+#include <exception>
 
 static_assert(!std::is_copy_constructible_v<Sound>);
 static_assert(!std::is_copy_assignable_v<Sound>);
@@ -107,7 +109,7 @@ struct GameTestAccess
                scene.weaponManager || scene.music || scene.context || scene.ownsRuntime ||
                scene.failedStartupObject || scene.contacts || scene.colliders || scene.camera ||
                !scene.activeObjects.empty() || !scene.pendingAdds.empty() ||
-               !scene.pendingRemovals.empty();
+               !scene.pendingRemovals.empty() || !scene.rejectedObjects.empty();
     }
 };
 
@@ -423,6 +425,10 @@ public:
         ++stats->updated;
         if (onUpdate) onUpdate(*this);
     }
+    void Render() override
+    {
+        if (onRender) onRender(*this);
+    }
     void CleanUp() override
     {
         ++stats->cleaned;
@@ -435,6 +441,7 @@ public:
     }
     std::function<void(QueueProbe&)> onInitialize;
     std::function<void(QueueProbe&)> onUpdate;
+    std::function<void(QueueProbe&)> onRender;
     std::function<void(QueueProbe&)> onCleanup;
 private:
     std::shared_ptr<QueueProbeStats> stats;
@@ -1329,6 +1336,106 @@ TEST_F(GameLifetime, FailedMiddleAdditionDoesNotReinitializeEarlierObjectsOrLose
     EXPECT_EQ(EntityCount(game.Registry()), initialEntities + 2);
 }
 
+TEST_F(GameLifetime, ImmediateInitializationRollbackDefersShutdownUntilCleanupReturns)
+{
+    auto stats = std::make_shared<QueueProbeStats>();
+    auto failed = std::make_unique<QueueProbe>(stats);
+    failed->onInitialize = [](QueueProbe& object)
+    {
+        object.Owner().RequestDestroy(object);
+        throw std::domain_error("Original initialization failure");
+    };
+    failed->onCleanup = [&](QueueProbe& object)
+    {
+        game.Scene().CleanUp();
+        EXPECT_TRUE(object.HasEntity());
+        EXPECT_EQ(stats->destroyed, 0);
+        EXPECT_TRUE(GameTestAccess::HasResources(game.Scene()));
+        EXPECT_THROW(game.Scene().Update(), std::logic_error);
+    };
+    EXPECT_THROW(game.AddObject(std::move(failed)), std::domain_error);
+    EXPECT_EQ(stats->initialized, 1);
+    EXPECT_EQ(stats->cleaned, 1);
+    EXPECT_EQ(stats->destroyed, 1);
+    EXPECT_FALSE(GameTestAccess::HasResources(game.Scene()));
+    EXPECT_EQ(game.PendingRemovalCount(), 0);
+    EXPECT_NO_THROW(game.Scene().CleanUp());
+}
+
+TEST_F(GameLifetime, FailedPhysicalRollbackPreservesOriginalExceptionAndRetriesCleanup)
+{
+    struct FailedProjectile : Projectile
+    {
+        explicit FailedProjectile(std::shared_ptr<QueueProbeStats> stats)
+            : Projectile(1000, 1000, 0, 0), stats(std::move(stats)) {}
+        ~FailedProjectile() override { ++stats->destroyed; }
+        void Initialise(const SceneContext& context) override
+        {
+            Projectile::Initialise(context);
+            ++stats->initialized;
+            context.objects.RequestDestroy(*this);
+            throw std::domain_error("Original physics initialization failure");
+        }
+        void CleanUp() override
+        {
+            if (++stats->cleaned == 1)
+                throw std::logic_error("Secondary rollback cleanup failure");
+            Projectile::CleanUp();
+        }
+        std::shared_ptr<QueueProbeStats> stats;
+    };
+    auto stats = std::make_shared<QueueProbeStats>();
+    auto failed = std::make_unique<FailedProjectile>(stats);
+    EntityId id = entt::null;
+    try
+    {
+        game.AddObject(std::move(failed));
+        FAIL() << "Initialization should fail";
+    }
+    catch (const std::domain_error& error)
+    {
+        EXPECT_STREQ(error.what(), "Original physics initialization failure");
+    }
+    EXPECT_EQ(stats->initialized, 1);
+    EXPECT_EQ(stats->cleaned, 1);
+    EXPECT_EQ(stats->destroyed, 0);
+    EXPECT_EQ(game.PendingRemovalCount(), 0);
+    EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies + 1);
+    EXPECT_EQ(EntityCount(game.Registry()), initialEntities + 1);
+    // The retained fixture still borrows valid metadata while cleanup awaits retry.
+    for (auto [entity, rigidBody] : game.Registry().view<RigidBody>().each())
+    {
+        if (rigidBody.body && rigidBody.body->GetPosition().x > 999)
+            id = entity;
+    }
+    ASSERT_TRUE(game.Registry().valid(id));
+    auto* body = game.Registry().get<RigidBody>(id).body;
+    auto* info = reinterpret_cast<PhysicsInfo*>(body->GetFixtureList()->GetUserData().pointer);
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(info->id, id);
+    EXPECT_EQ(info->world, &game.Physics());
+    b2BodyDef definition;
+    definition.position.Set(1000, 1000);
+    auto* obstacle = game.Physics().CreateBody(&definition);
+    b2PolygonShape shape;
+    shape.SetAsBox(0.5f, 0.5f);
+    b2FixtureDef fixture;
+    fixture.shape = &shape;
+    fixture.isSensor = true;
+    obstacle->CreateFixture(&fixture);
+    EXPECT_NO_THROW(game.Physics().Step(1.f / 60, 8, 3));
+    ASSERT_NE(body->GetContactList(), nullptr);
+    EXPECT_EQ(stats->destroyed, 0);
+    EXPECT_NO_THROW(game.Scene().Update());
+    EXPECT_EQ(stats->cleaned, 2);
+    EXPECT_EQ(stats->destroyed, 1);
+    EXPECT_FALSE(game.Registry().valid(id));
+    EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies + 1);
+    game.Physics().DestroyBody(obstacle);
+    EXPECT_EQ(game.Physics().GetBodyCount(), initialBodies);
+    EXPECT_EQ(EntityCount(game.Registry()), initialEntities);
+}
+
 TEST_F(GameLifetime, PendingObjectCanBeCancelledBeforeInitialization)
 {
     auto stats = std::make_shared<QueueProbeStats>();
@@ -1506,6 +1613,34 @@ TEST_F(GameLifetime, FailedStartupObjectRemainsAliveWhileItsDependentsAreCleaned
     EXPECT_EQ(failedStats->destroyed, 1);
     EXPECT_FALSE(game.HasResources());
     EXPECT_NO_THROW(game.Clean());
+}
+
+TEST_F(GameLifetime, FailedStartupRollbackKeepsObjectAliveEvenWhenCleanupFails)
+{
+    auto failedStats = std::make_shared<QueueProbeStats>();
+    auto observerStats = std::make_shared<QueueProbeStats>();
+    auto failed = std::make_unique<QueueProbe>(failedStats);
+    failed->onInitialize = [](QueueProbe&) { throw std::domain_error("Startup failure"); };
+    failed->onCleanup = [failedStats](QueueProbe&)
+    {
+        if (failedStats->cleaned == 1)
+            throw std::logic_error("Startup rollback cleanup failure");
+    };
+    auto observer = std::make_unique<QueueProbe>(observerStats);
+    observer->onCleanup = [failedStats](QueueProbe&)
+    {
+        EXPECT_EQ(failedStats->destroyed, 0);
+        EXPECT_EQ(failedStats->cleaned, 2);
+    };
+    game.AddObject(std::move(observer));
+    EXPECT_THROW(GameTestAccess::ActivateStartupObject(game.Scene(), std::move(failed)),
+                 std::domain_error);
+    EXPECT_EQ(failedStats->cleaned, 1);
+    EXPECT_EQ(failedStats->destroyed, 0);
+    EXPECT_NO_THROW(game.Clean());
+    EXPECT_EQ(observerStats->destroyed, 1);
+    EXPECT_EQ(failedStats->destroyed, 1);
+    EXPECT_FALSE(game.HasResources());
 }
 
 TEST_F(GameLifetime, MissingWeaponPowerBarRollsBackWithoutDanglingManagerReferences)
@@ -1743,6 +1878,279 @@ TEST_F(GameLifetime, GameClosesWithActiveProjectileParticlesAndPendingObjects)
     EXPECT_EQ(ImGui::GetCurrentContext(), nullptr);
     EXPECT_EQ(game.AudioOutput().IsOpen(), 0);
     EXPECT_NO_THROW(game.Clean());
+}
+
+static void CreateDistantContact(InspectableGame& game, PhysicsInfo& info)
+{
+    b2BodyDef definition;
+    definition.position.Set(1000, 1000);
+    auto* fixed = game.Physics().CreateBody(&definition);
+    b2PolygonShape shape;
+    shape.SetAsBox(0.5f, 0.5f);
+    b2FixtureDef fixture;
+    fixture.shape = &shape;
+    fixture.isSensor = true;
+    fixture.userData.pointer = reinterpret_cast<uintptr_t>(&info);
+    fixed->CreateFixture(&fixture);
+    definition.type = b2_dynamicBody;
+    game.Physics().CreateBody(&definition)->CreateFixture(&shape, 1);
+}
+
+TEST_F(GameLifetime, LockedCollisionDefersRejectedObjectsAndQueueChanges)
+{
+    auto rejected = std::make_unique<Projectile>(2000, 2000, 0, 0);
+    rejected->Initialise(game.Context());
+    const auto rejectedId = rejected->GetId();
+    auto rejectedQueued = std::make_unique<Projectile>(3000, 3000, 0, 0);
+    rejectedQueued->Initialise(game.Context());
+    const auto queuedId = rejectedQueued->GetId();
+    auto removedStats = std::make_shared<QueueProbeStats>();
+    auto& removed = game.AddObject(std::make_unique<QueueProbe>(removedStats));
+    const auto removedId = removed.GetId();
+    auto addedStats = std::make_shared<QueueProbeStats>();
+    PhysicsInfo info{NONE, game.Registry().create()};
+    CreateDistantContact(game, info);
+    const auto bodies = game.Physics().GetBodyCount();
+    int calls = 0;
+    game.Context().contacts.AddEvent(*MakeHandle(game.Registry(), info.id), BEGIN,
+        [&](b2Contact*)
+        {
+            ++calls;
+            EXPECT_TRUE(game.Physics().IsLocked());
+            EXPECT_THROW(rejected->CleanUp(), std::logic_error);
+            EXPECT_THROW(game.AddObject(std::move(rejected)), std::logic_error);
+            EXPECT_THROW(game.QueueAdd(std::move(rejectedQueued)), std::invalid_argument);
+            EXPECT_TRUE(game.Registry().valid(rejectedId));
+            EXPECT_TRUE(game.Registry().valid(queuedId));
+            EXPECT_EQ(game.Physics().GetBodyCount(), bodies);
+            b2CircleShape shape;
+            shape.m_radius = 0.1f;
+            PhysicsInfo newInfo{NONE, info.id};
+            EXPECT_THROW(game.Context().colliders.CreateStaticBody(&shape, {0, 0}, newInfo),
+                         std::logic_error);
+            EXPECT_EQ(newInfo.world, nullptr);
+            game.QueueAdd(std::make_unique<QueueProbe>(addedStats));
+            game.RequestDestroy(removed);
+            game.RequestDestroy(removed);
+            EXPECT_EQ(removedStats->destroyed, 0);
+            EXPECT_EQ(addedStats->initialized, 0);
+        });
+    game.Physics().Step(1.f / 60, 8, 3);
+    EXPECT_EQ(calls, 1);
+    EXPECT_TRUE(game.Registry().valid(rejectedId));
+    EXPECT_NO_THROW(game.Scene().Update());
+    EXPECT_FALSE(game.Registry().valid(rejectedId));
+    EXPECT_FALSE(game.Registry().valid(queuedId));
+    EXPECT_FALSE(game.Registry().valid(removedId));
+    EXPECT_EQ(removedStats->destroyed, 1);
+    EXPECT_EQ(addedStats->initialized, 1);
+    EXPECT_EQ(game.Physics().GetBodyCount(), bodies - 2);
+    game.Scene().CleanUp();
+}
+
+TEST_F(GameLifetime, SceneShutdownFromUpdateWaitsUntilCallbackReturns)
+{
+    auto stats = std::make_shared<QueueProbeStats>();
+    auto probe = std::make_unique<QueueProbe>(stats);
+    probe->onUpdate = [&](QueueProbe& object)
+    {
+        game.Scene().CleanUp();
+        EXPECT_TRUE(object.HasEntity());
+        EXPECT_EQ(stats->destroyed, 0);
+        EXPECT_TRUE(GameTestAccess::HasResources(game.Scene()));
+    };
+    game.AddObject(std::move(probe));
+    EXPECT_NO_THROW(game.Scene().Update());
+    EXPECT_EQ(stats->destroyed, 1);
+    EXPECT_FALSE(GameTestAccess::HasResources(game.Scene()));
+    EXPECT_NO_THROW(game.Scene().CleanUp());
+}
+
+TEST_F(GameLifetime, TeamRejectionDuringStepKeepsWormAliveUntilSafeCleanup)
+{
+    WormTeam inactiveTeam(WormTeam::TexturePtr{});
+    int destroyed = 0;
+    auto worm = std::make_unique<TrackedWorm>(*camera, game.Assets().GetTexture("powerBar.png"), destroyed);
+    worm->Initialise(game.Context());
+    const auto id = worm->GetId();
+    PhysicsInfo info{NONE, game.Registry().create()};
+    CreateDistantContact(game, info);
+    const auto bodies = game.Physics().GetBodyCount();
+    int calls = 0;
+    game.Context().contacts.AddEvent(*MakeHandle(game.Registry(), info.id), BEGIN,
+        [&](b2Contact*)
+        {
+            ++calls;
+            EXPECT_TRUE(game.Physics().IsLocked());
+            EXPECT_THROW(inactiveTeam.AddWorm(std::move(worm)), std::logic_error);
+            EXPECT_EQ(destroyed, 0);
+            EXPECT_TRUE(game.Registry().valid(id));
+            EXPECT_EQ(game.Physics().GetBodyCount(), bodies);
+        });
+    game.Physics().Step(1.f / 60, 8, 3);
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(destroyed, 0);
+    EXPECT_NO_THROW(game.Scene().Update());
+    EXPECT_EQ(destroyed, 1);
+    EXPECT_FALSE(game.Registry().valid(id));
+    EXPECT_EQ(game.Physics().GetBodyCount(), bodies - 1);
+    game.Scene().CleanUp();
+}
+
+TEST_F(GameLifetime, ImmediateRetirementDefersShutdownUntilObjectCleanupReturns)
+{
+    auto stats = std::make_shared<QueueProbeStats>();
+    auto object = std::make_unique<QueueProbe>(stats);
+    object->Initialise(game.Context());
+    object->onCleanup = [&](QueueProbe& probe)
+    {
+        game.Scene().CleanUp();
+        EXPECT_TRUE(probe.HasEntity());
+        EXPECT_EQ(stats->destroyed, 0);
+        EXPECT_TRUE(GameTestAccess::HasResources(game.Scene()));
+        EXPECT_THROW(game.Scene().Update(), std::logic_error);
+    };
+    EXPECT_NO_THROW(game.Scene().RetireObject(std::move(object)));
+    EXPECT_EQ(stats->cleaned, 1);
+    EXPECT_EQ(stats->destroyed, 1);
+    EXPECT_FALSE(GameTestAccess::HasResources(game.Scene()));
+}
+
+#if GTEST_HAS_DEATH_TEST
+TEST_F(GameLifetime, DestroyingSceneDuringImmediateRetirementFailsBeforeReleasingScene)
+{
+    auto stats = std::make_shared<QueueProbeStats>();
+    auto object = std::make_unique<QueueProbe>(stats);
+    object->Initialise(game.Context());
+    object->onCleanup = [&](QueueProbe&) { GameTestAccess::ResetScene(game); };
+    EXPECT_EXIT({
+        std::set_terminate([] { std::_Exit(73); });
+        game.Scene().RetireObject(std::move(object));
+    }, testing::ExitedWithCode(73), "");
+    object->onCleanup = {};
+    game.Scene().RetireObject(std::move(object));
+}
+
+TEST_F(GameLifetime, DestroyingSceneDuringCleanupFailsBeforeReleasingExecutingScene)
+{
+    auto stats = std::make_shared<QueueProbeStats>();
+    auto object = std::make_unique<QueueProbe>(stats);
+    auto* pointer = object.get();
+    object->onCleanup = [&](QueueProbe&) { GameTestAccess::ResetScene(game); };
+    game.AddObject(std::move(object));
+    EXPECT_EXIT({
+        std::set_terminate([] { std::_Exit(73); });
+        game.Scene().CleanUp();
+    }, testing::ExitedWithCode(73), "");
+    pointer->onCleanup = {};
+}
+#endif
+
+TEST_F(GameLifetime, EndContactDuringImmediateRetirementDefersSceneShutdown)
+{
+    auto projectile = std::make_unique<Projectile>(1000, 1000, 0, 0);
+    projectile->Initialise(game.Context());
+    b2BodyDef definition;
+    definition.position.Set(1000, 1000);
+    auto* obstacle = game.Physics().CreateBody(&definition);
+    b2PolygonShape shape;
+    shape.SetAsBox(0.5f, 0.5f);
+    b2FixtureDef fixture;
+    fixture.shape = &shape;
+    fixture.isSensor = true;
+    obstacle->CreateFixture(&fixture);
+    int calls = 0;
+    game.Context().contacts.AddEvent(projectile->GetHandle(), END, [&](b2Contact*)
+    {
+        ++calls;
+        EXPECT_FALSE(game.Physics().IsLocked());
+        game.Scene().CleanUp();
+        EXPECT_TRUE(GameTestAccess::HasResources(game.Scene()));
+    });
+    game.Physics().Step(1.f / 60, 8, 3);
+    ASSERT_NE(game.Registry().get<RigidBody>(projectile->GetId()).body->GetContactList(), nullptr);
+    EXPECT_NO_THROW(game.Scene().RetireObject(std::move(projectile)));
+    EXPECT_EQ(calls, 1);
+    EXPECT_FALSE(GameTestAccess::HasResources(game.Scene()));
+}
+
+TEST_F(GameLifetime, FailedRejectedObjectCleanupRetainsOwnershipForRetry)
+{
+    auto rejectedStats = std::make_shared<QueueProbeStats>();
+    auto rejected = std::make_unique<QueueProbe>(rejectedStats);
+    rejected->onCleanup = [rejectedStats](QueueProbe&)
+    {
+        if (rejectedStats->cleaned == 1)
+            throw std::runtime_error("Retry rejected cleanup");
+    };
+    auto triggerStats = std::make_shared<QueueProbeStats>();
+    auto trigger = std::make_unique<QueueProbe>(triggerStats);
+    trigger->onUpdate = [&](QueueProbe&)
+    {
+        if (rejected)
+            EXPECT_THROW(game.AddObject(std::move(rejected)), std::logic_error);
+    };
+    game.AddObject(std::move(trigger));
+    EXPECT_NO_THROW(game.Scene().Update());
+    EXPECT_EQ(rejectedStats->cleaned, 0);
+    EXPECT_EQ(rejectedStats->destroyed, 0);
+    EXPECT_THROW(game.Scene().Update(), std::runtime_error);
+    EXPECT_EQ(rejectedStats->cleaned, 1);
+    EXPECT_EQ(rejectedStats->destroyed, 0);
+    EXPECT_NO_THROW(game.Scene().Update());
+    EXPECT_EQ(rejectedStats->cleaned, 2);
+    EXPECT_EQ(rejectedStats->destroyed, 1);
+}
+
+TEST_F(GameLifetime, SceneShutdownFromRenderWaitsUntilCallbackReturns)
+{
+    auto stats = std::make_shared<QueueProbeStats>();
+    auto probe = std::make_unique<QueueProbe>(stats);
+    probe->onRender = [&](QueueProbe& object)
+    {
+        game.Scene().CleanUp();
+        EXPECT_TRUE(object.HasEntity());
+        EXPECT_EQ(stats->destroyed, 0);
+    };
+    game.AddObject(std::move(probe));
+    EXPECT_NO_THROW(game.Scene().Render());
+    EXPECT_EQ(stats->destroyed, 1);
+    EXPECT_FALSE(GameTestAccess::HasResources(game.Scene()));
+}
+
+TEST_F(GameLifetime, ExternalPhysicsStepDefersSceneShutdownUntilNextUpdate)
+{
+    PhysicsInfo info{NONE, game.Registry().create()};
+    CreateDistantContact(game, info);
+    int calls = 0;
+    game.Context().contacts.AddEvent(*MakeHandle(game.Registry(), info.id), BEGIN,
+        [&](b2Contact*)
+        {
+            ++calls;
+            game.Scene().CleanUp();
+            EXPECT_TRUE(game.Physics().IsLocked());
+            EXPECT_TRUE(GameTestAccess::HasResources(game.Scene()));
+        });
+    game.Physics().Step(1.f / 60, 8, 3);
+    EXPECT_EQ(calls, 1);
+    EXPECT_FALSE(game.Physics().IsLocked());
+    EXPECT_TRUE(GameTestAccess::HasResources(game.Scene()));
+    EXPECT_NO_THROW(game.Scene().Update());
+    EXPECT_FALSE(GameTestAccess::HasResources(game.Scene()));
+}
+
+TEST_F(GameLifetime, CollisionShutdownStillCompletesWhenCallbackThrows)
+{
+    PhysicsInfo info{NONE, game.Registry().create()};
+    CreateDistantContact(game, info);
+    game.Context().contacts.AddEvent(*MakeHandle(game.Registry(), info.id), BEGIN,
+        [&](b2Contact*)
+        {
+            game.Scene().CleanUp();
+            throw std::runtime_error("Shutdown collision failure");
+        });
+    EXPECT_THROW(game.Scene().Update(), std::runtime_error);
+    EXPECT_FALSE(GameTestAccess::HasResources(game.Scene()));
 }
 
 TEST_F(GameLifetime, ProjectileCanUnsubscribeDuringCollisionWithoutRemovingOtherListeners)

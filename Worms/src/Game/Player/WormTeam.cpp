@@ -27,7 +27,13 @@ void WormTeam::AddWorm(std::unique_ptr<Worm> worm)
     {
         if (worm)
         {
-            worm->CleanUp();
+            if (worm->context)
+            {
+                auto& commands = worm->context->objects;
+                commands.RetireObject(std::move(worm));
+            }
+            else
+                worm->CleanUp();
         }
         throw;
     }

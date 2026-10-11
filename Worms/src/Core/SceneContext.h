@@ -12,13 +12,15 @@ class Renderer2D;
 class Audio;
 class Input;
 
-// Commands borrow their recipient; ownership transfers only through QueueAdd.
+// Commands borrow their recipient; QueueAdd and RetireObject transfer ownership.
 class ObjectCommands
 {
 public:
     virtual ~ObjectCommands() = default;
     virtual void QueueAdd(std::unique_ptr<GameObject> object) = 0;
     virtual void RequestDestroy(GameObject& object) = 0;
+    // Keeps ownership until cleanup can safely release physics and ECS resources.
+    virtual void RetireObject(std::unique_ptr<GameObject> object) = 0;
 };
 
 // Non-owning dependencies. The renderer may be null for headless ECS tests.

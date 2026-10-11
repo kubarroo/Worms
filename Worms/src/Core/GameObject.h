@@ -47,11 +47,13 @@ public:
 protected:
     const SceneContext& Context() const;
     entt::registry& Registry() const { return Context().registry; }
+    void RequireUnlockedPhysics() const;
     EntityId objectId = entt::null;
     bool hasEntity = false;
     SDL_Renderer* renderer = nullptr;
 
 private:
     friend class GameScene;
+    friend class WormTeam;
     std::optional<SceneContext> context;
 };

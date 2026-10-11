@@ -32,9 +32,11 @@ public:
     const SceneContext& Context() const;
     void QueueAdd(std::unique_ptr<GameObject> object) override;
     void RequestDestroy(GameObject& object) override;
+    void RetireObject(std::unique_ptr<GameObject> object) override;
     // Immediate initialization is allowed only outside frame processing.
     GameObject& AddObject(std::unique_ptr<GameObject> object);
-    // Reports cleanup errors and continues releasing the remaining scene resources.
+    // During a frame/physics callback, requests cleanup at the next safe boundary.
+    // The scene itself must outlive all executing methods and callbacks.
     void CleanUp() noexcept;
 
 private:
@@ -44,6 +46,9 @@ private:
     void ProcessPendingAdds();
     void ProcessPendingRemovals();
     void ValidateObject(const GameObject& object) const;
+    void CleanupRejected(std::unique_ptr<GameObject> object);
+    void ProcessRejectedObjects();
+    void RequireUnlockedPhysics() const;
 
     SDL_Renderer* renderer;
     ResourceManager& resources;
@@ -54,11 +59,14 @@ private:
     bool initialized = false;
     bool processingFrame = false;
     bool cleaningUp = false;
+    bool cleanupRequested = false;
+    unsigned cleanupDepth = 0;
     GameObject* initializingObject = nullptr;
     std::unique_ptr<GameObject> failedStartupObject;
     std::vector<std::unique_ptr<GameObject>> activeObjects;
     std::deque<std::unique_ptr<GameObject>> pendingAdds;
     std::deque<GameObject*> pendingRemovals;
+    std::deque<std::unique_ptr<GameObject>> rejectedObjects;
     entt::registry registry;
     std::unique_ptr<b2World> physicsWorld;
     std::unique_ptr<ContactManager> contacts;

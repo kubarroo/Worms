@@ -5,6 +5,9 @@
 #include <functional>
 #include <optional>
 #include <cstdint>
+#include <memory>
+#include <type_traits>
+#include <utility>
 
 struct Position
 {
@@ -44,6 +47,7 @@ struct RenderOrder
 
 struct RigidBody
 {
+    // Borrowed from Box2D; the object owner destroys the body before its entity.
     b2Body* body = nullptr;
 };
 
@@ -65,10 +69,43 @@ struct Follow
     float offsetY = 0.f;
 };
 
+template <typename Signature> class ParticleCharacteristic;
+
+template <typename Result, typename... Args>
+class ParticleCharacteristic<Result(Args...)>
+{
+public:
+    ParticleCharacteristic() = default;
+    ParticleCharacteristic(std::nullptr_t) {}
+
+    template <typename Callable>
+        requires (!std::is_same_v<std::remove_cvref_t<Callable>, ParticleCharacteristic> &&
+                  std::is_constructible_v<std::function<Result(Args...)>, Callable>)
+    ParticleCharacteristic(Callable&& callable)
+    {
+        std::function<Result(Args...)> value(std::forward<Callable>(callable));
+        if (value) function = std::make_shared<std::function<Result(Args...)>>(std::move(value));
+    }
+
+    explicit operator bool() const noexcept { return static_cast<bool>(function); }
+    Result operator()(Args... args) const
+    {
+        if (!function) throw std::bad_function_call();
+        // Hold the callable even if it removes or replaces its own component.
+        auto invocation = function;
+        return (*invocation)(std::forward<Args>(args)...);
+    }
+
+private:
+    std::shared_ptr<std::function<Result(Args...)>> function;
+};
+
 struct Particle
 {
+    // Borrowed from the non-movable ParticleSystem, which destroys its particles first.
     float* progress = nullptr;
-    std::function<std::pair<float, float>(float, float)> pos_characteristic = nullptr;
-    std::function<std::pair<float, float>(float, float)> vel_characteristic = nullptr;
-    std::function<float(float)> size_characteristic = nullptr;
+    // Copies retain the same callable state and keep an executing callback alive.
+    ParticleCharacteristic<std::pair<float, float>(float, float)> pos_characteristic = nullptr;
+    ParticleCharacteristic<std::pair<float, float>(float, float)> vel_characteristic = nullptr;
+    ParticleCharacteristic<float(float)> size_characteristic = nullptr;
 };

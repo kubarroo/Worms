@@ -37,6 +37,7 @@ void Weapon::Initialise(const SceneContext& context)
 
 void Weapon::CleanUp()
 {
+    RequireUnlockedPhysics();
     ClearParent();
     Deactivate();
     projTexture = nullptr;

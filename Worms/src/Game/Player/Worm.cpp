@@ -132,6 +132,7 @@ void Worm::Jump()
 
 void Worm::CleanUp()
 {
+    RequireUnlockedPhysics();
     if (!HasEntity())
     {
         return;

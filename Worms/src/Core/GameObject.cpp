@@ -1,5 +1,12 @@
 #include "Core/GameObject.h"
 #include "Core/Physics/ContactManager.h"
+#include <box2d/b2_world.h>
+
+void GameObject::RequireUnlockedPhysics() const
+{
+    if (context && context->physics.IsLocked())
+        throw std::logic_error("Object cleanup requires an unlocked physics world");
+}
 
 const SceneContext& GameObject::Context() const
 {
@@ -10,6 +17,8 @@ const SceneContext& GameObject::Context() const
 
 void GameObject::Initialise(const SceneContext& newContext)
 {
+    if (newContext.physics.IsLocked())
+        throw std::logic_error("Object initialization requires an unlocked physics world");
     if (hasEntity)
     {
         throw std::logic_error("GameObject already has an entity");
@@ -25,6 +34,7 @@ void GameObject::Initialise(const SceneContext& newContext)
 
 void GameObject::CleanUp()
 {
+    RequireUnlockedPhysics();
     if (!hasEntity)
     {
         return;

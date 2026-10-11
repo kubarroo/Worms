@@ -125,6 +125,31 @@ both the owning registry and the entity version. Objects release physics bodies
 and collision subscriptions through their cleanup process before destroying
 their entities; removing an ECS component does not release a Box2D body.
 
+During frames and collision callbacks, use QueueAdd and RequestDestroy instead
+of immediate object initialization/cleanup. Rejected objects retain ownership
+until cleanup is safe. RetireObject transfers rejected initialized objects
+(including worms rejected by a team) to their owning scene for safe cleanup.
+Box2D creation and object cleanup reject locked worlds
+before modifying resources. Scene CleanUp called during a frame or Step requests
+shutdown at the next safe boundary (the next Update/Render for an external Step).
+The scene owner must never destroy/reset the scene from an executing callback.
+This includes cleanup callbacks; violating that contract terminates before
+releasing the executing scene. Shutdown requests during immediate retirement
+are deferred until the object's cleanup returns, including EndContact callbacks.
+Initialization rollback uses the same cleanup protection, reports secondary
+cleanup errors without replacing the initialization exception, and retains
+objects whose cleanup needs a retry. Failed startup objects remain alive until
+their dependent managers and objects have been cleaned.
+
+Do not retain component pointers across removal, sorting, or arbitrary callbacks.
+Use owner-aware entity handles and resolve components when needed. Particle
+updates snapshot entity IDs and numerical callbacks, then reacquire components;
+new particles wait for the next update and recycled slots are never revisited.
+Characteristics retain mutable callback state through shared callable ownership,
+including when component pools are compacted during an invocation.
+Fixture metadata and particle progress pointers borrow stable object members;
+their owners must outlive the fixtures and particle entities respectively.
+
 ## Planned Changes
 
 - Improve resource ownership and object lifetimes

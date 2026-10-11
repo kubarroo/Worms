@@ -40,6 +40,7 @@ void Projectile::Update()
 
 void Projectile::CleanUp()
 {
+    RequireUnlockedPhysics();
     if (collisionSubscription)
         Context().contacts.RemoveEvent(collisionSubscription);
     collisionSubscription = 0;

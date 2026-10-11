@@ -15,6 +15,7 @@ ParticleSystem::ParticleSystem(std::string particleImg, float startScale, float 
 
 void ParticleSystem::CleanUp()
 {
+    RequireUnlockedPhysics();
     if (!HasEntity())
     {
         return;

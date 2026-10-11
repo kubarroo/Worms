@@ -4,6 +4,7 @@
 #include "Game/Components.h"
 #include <entt/entity/registry.hpp>
 #include <numbers>
+#include <vector>
 
 class Movement
 {
@@ -66,17 +67,32 @@ class ParticleUpdater
 public:
     static void Update(entt::registry& registry)
     {
-        for (auto [entity, particle, position, scale, sprite, motion] :
-             registry.view<const Particle, const Position, Scale, const Sprite, Motion>().each())
+        // Callbacks may compact pools. Never keep iterators or component references across them.
+        std::vector<EntityId> entities;
+        for (auto entity : registry.view<const Particle, const Position, Scale, const Sprite, Motion>())
+            entities.push_back(entity);
+        const auto eligible = [&registry](EntityId entity)
         {
+            return registry.valid(entity) &&
+                registry.all_of<Particle, Position, Scale, Sprite, Motion>(entity);
+        };
+        for (auto entity : entities)
+        {
+            if (!eligible(entity)) continue;
+            const auto particle = registry.get<Particle>(entity);
             if (particle.vel_characteristic)
             {
+                const auto motion = registry.get<Motion>(entity);
                 auto [x, y] = particle.vel_characteristic(motion.v_x, motion.v_y);
-                motion.v_x = x;
-                motion.v_y = y;
+                if (!eligible(entity)) continue;
+                registry.get<Motion>(entity) = Motion{x, y};
             }
             if (particle.size_characteristic)
-                scale.size = particle.size_characteristic(scale.size);
+            {
+                const auto size = registry.get<Scale>(entity).size;
+                const auto result = particle.size_characteristic(size);
+                if (eligible(entity)) registry.get<Scale>(entity).size = result;
+            }
         }
     }
 };

@@ -29,17 +29,37 @@ namespace
 class ScopedFrame
 {
 public:
-    explicit ScopedFrame(bool& flag) : flag(flag)
+    ScopedFrame(bool& flag, bool& cleanupRequested, GameScene& scene)
+        : flag(flag), cleanupRequested(cleanupRequested), scene(scene)
     {
         flag = true;
     }
     ~ScopedFrame()
     {
         flag = false;
+        if (cleanupRequested)
+            scene.CleanUp();
     }
 
 private:
     bool& flag;
+    bool& cleanupRequested;
+    GameScene& scene;
+};
+
+class ScopedObjectCleanup
+{
+public:
+    ScopedObjectCleanup(unsigned& depth, bool& requested, GameScene& scene)
+        : depth(depth), requested(requested), scene(scene) { ++depth; }
+    ~ScopedObjectCleanup()
+    {
+        if (--depth == 0 && requested) scene.CleanUp();
+    }
+private:
+    unsigned& depth;
+    bool& requested;
+    GameScene& scene;
 };
 
 void ReportCleanupError(const char* operation, std::exception_ptr error) noexcept
@@ -66,15 +86,17 @@ void ReportCleanupError(const char* operation, std::exception_ptr error) noexcep
     } // Logging must not interrupt resource cleanup.
 }
 
-template <typename Cleanup> void TryCleanup(const char* operation, Cleanup&& cleanup) noexcept
+template <typename Cleanup> bool TryCleanup(const char* operation, Cleanup&& cleanup) noexcept
 {
     try
     {
         cleanup();
+        return true;
     }
     catch (...)
     {
         ReportCleanupError(operation, std::current_exception());
+        return false;
     }
 }
 } // namespace
@@ -93,6 +115,10 @@ GameScene::GameScene(SDL_Renderer* renderer, ResourceManager& resources,
 
 GameScene::~GameScene()
 {
+    // An owner must not destroy a scene from one of its executing callbacks.
+    if (processingFrame || initializingObject || cleaningUp || cleanupDepth ||
+        (physicsWorld && physicsWorld->IsLocked()))
+        std::terminate();
     CleanUp();
 }
 
@@ -102,6 +128,7 @@ void GameScene::Initialize()
         throw std::logic_error("Scene is already initialized");
 
     ownsRuntime = true;
+    ScopedFrame frame(processingFrame, cleanupRequested, *this);
     try
     {
         physicsWorld = std::make_unique<b2World>(b2Vec2(0, -9.811f));
@@ -192,7 +219,7 @@ void GameScene::QueueAdd(std::unique_ptr<GameObject> object)
     }
     catch (...)
     {
-        TryCleanup("Rejected queued object cleanup", [&object] { object->CleanUp(); });
+        CleanupRejected(std::move(object));
         throw;
     }
     pendingAdds.emplace_back(std::move(object));
@@ -200,10 +227,11 @@ void GameScene::QueueAdd(std::unique_ptr<GameObject> object)
 
 GameObject& GameScene::AddObject(std::unique_ptr<GameObject> object)
 {
-    if (processingFrame || initializingObject)
+    if (processingFrame || initializingObject || cleanupDepth ||
+        (physicsWorld && physicsWorld->IsLocked()))
     {
         if (object)
-            TryCleanup("Rejected immediate object cleanup", [&object] { object->CleanUp(); });
+            CleanupRejected(std::move(object));
         throw std::logic_error("Use QueueAdd during frame processing or initialization");
     }
     return ActivateObject(std::move(object));
@@ -219,7 +247,7 @@ GameObject& GameScene::ActivateObject(std::unique_ptr<GameObject> object)
     }
     catch (...)
     {
-        TryCleanup("Rejected object cleanup", [&object] { object->CleanUp(); });
+        CleanupRejected(std::move(object));
         throw;
     }
     initializingObject = object.get();
@@ -236,13 +264,20 @@ GameObject& GameScene::ActivateObject(std::unique_ptr<GameObject> object)
     }
     catch (...)
     {
+        const auto initializationError = std::current_exception();
+        ScopedObjectCleanup rollback(cleanupDepth, cleanupRequested, *this);
         std::erase(pendingRemovals, initializingObject);
         initializingObject = nullptr;
-        TryCleanup("Failed object initialization cleanup", [&object] { object->CleanUp(); });
+        const bool cleaned = TryCleanup("Failed object initialization cleanup",
+                                        [&object] { object->CleanUp(); });
         // Startup managers may still reference this object while the scene rolls back.
         if (!initialized)
             failedStartupObject = std::move(object);
-        throw;
+        else if (!cleaned)
+            rejectedObjects.emplace_back(std::move(object));
+        else
+            object.reset();
+        std::rethrow_exception(initializationError);
     }
 }
 
@@ -261,6 +296,7 @@ void GameScene::RequestDestroy(GameObject& object)
 
 void GameScene::ProcessPendingAdds()
 {
+    RequireUnlockedPhysics();
     // Process only this batch; additions from initialization wait for the next frame.
     const auto count = pendingAdds.size();
     for (std::size_t index = 0; index < count; ++index)
@@ -275,11 +311,13 @@ void GameScene::ProcessPendingAdds()
             continue;
         }
         ActivateObject(std::move(object));
+        if (cleanupRequested) return;
     }
 }
 
 void GameScene::ProcessPendingRemovals()
 {
+    RequireUnlockedPhysics();
     const auto count = pendingRemovals.size();
     for (std::size_t index = 0; index < count; ++index)
     {
@@ -302,11 +340,18 @@ void GameScene::ProcessPendingRemovals()
 
 void GameScene::Update()
 {
+    RequireUnlockedPhysics();
+    if (processingFrame || cleanupDepth)
+        throw std::logic_error("Scene update is already in progress");
+    if (cleanupRequested && !processingFrame)
+    {
+        CleanUp();
+        return;
+    }
     if (!initialized)
         return;
-    if (processingFrame)
-        throw std::logic_error("Scene update is already in progress");
-    ScopedFrame frame(processingFrame);
+    ScopedFrame frame(processingFrame, cleanupRequested, *this);
+    ProcessRejectedObjects();
     contacts->Update();
 
     Movement::Update(registry);
@@ -314,17 +359,22 @@ void GameScene::Update()
     TargetSystem::Update(registry);
     ParticleUpdater::Update(registry);
     contacts->RethrowPendingException();
+    if (cleanupRequested) return;
     physicsWorld->Step(static_cast<float>(Time::deltaTime), 8, 3);
     contacts->RethrowPendingException();
+    if (cleanupRequested) return;
     wormManager->Update();
     weaponManager->Update();
 
     ProcessPendingAdds();
     ProcessPendingRemovals();
+    ProcessRejectedObjects();
+    if (cleanupRequested) return;
 
     for (auto& gameObject : activeObjects)
     {
         gameObject->Update();
+        if (cleanupRequested) return;
         if (gameObject.get() == camera && camera->ConsumeTargetLost())
             wormManager->OnCameraTargetLost();
     }
@@ -333,13 +383,22 @@ void GameScene::Update()
 
 void GameScene::Render()
 {
+    RequireUnlockedPhysics();
+    if (processingFrame || cleanupDepth)
+        throw std::logic_error("Scene frame is already in progress");
+    if (cleanupRequested && !processingFrame)
+    {
+        CleanUp();
+        return;
+    }
     if (!initialized)
         return;
-    if (processingFrame)
-        throw std::logic_error("Scene frame is already in progress");
-    ScopedFrame frame(processingFrame);
+    ScopedFrame frame(processingFrame, cleanupRequested, *this);
     for (auto& gameObject : activeObjects)
+    {
         gameObject->Render();
+        if (cleanupRequested) return;
+    }
 
     SpriteRenderer::Render(registry, rendering, *camera);
     wormManager->RenderHealthBars();
@@ -347,6 +406,10 @@ void GameScene::Render()
 
 void GameScene::RenderDebug()
 {
+    RequireUnlockedPhysics();
+    if (processingFrame || cleanupDepth)
+        throw std::logic_error("Scene frame is already in progress");
+    ScopedFrame frame(processingFrame, cleanupRequested, *this);
     if (initialized)
         physicsWorld->DebugDraw();
 }
@@ -355,6 +418,13 @@ void GameScene::CleanUp() noexcept
 {
     if (!ownsRuntime || cleaningUp)
         return;
+    if (processingFrame || initializingObject || cleanupDepth ||
+        (physicsWorld && physicsWorld->IsLocked()))
+    {
+        cleanupRequested = true;
+        return;
+    }
+    cleanupRequested = false;
     initialized = false;
     cleaningUp = true;
 
@@ -365,7 +435,6 @@ void GameScene::CleanUp() noexcept
         physicsWorld->SetContactListener(nullptr);
         physicsWorld->SetDebugDraw(nullptr);
     }
-
     if (wormManager)
     {
         TryCleanup("Worm manager cleanup failed", [this] { wormManager->CleanUp(); });
@@ -392,6 +461,11 @@ void GameScene::CleanUp() noexcept
         }
     }
 
+    // Indexing remains valid when a cleanup callback retires another object.
+    for (std::size_t index = 0; index < rejectedObjects.size(); ++index)
+        TryCleanup("Rejected object cleanup failed", [this, index]
+                   { rejectedObjects[index]->CleanUp(); });
+
     if (contacts)
     {
         ReportCleanupError("Collision callback failed during cleanup",
@@ -412,10 +486,53 @@ void GameScene::CleanUp() noexcept
     context.reset();
     colliders.reset();
     physicsWorld.reset();
+    rejectedObjects.clear();
     contacts.reset();
     registry.clear();
     registry.ctx().erase<RenderSequence>();
 
     ownsRuntime = false;
     cleaningUp = false;
+}
+
+void GameScene::RequireUnlockedPhysics() const
+{
+    if (physicsWorld && physicsWorld->IsLocked())
+        throw std::logic_error("Scene structural operations require an unlocked physics world");
+}
+
+void GameScene::CleanupRejected(std::unique_ptr<GameObject> object)
+{
+    // Route foreign initialized objects to their owner, preserving borrowed fixture metadata.
+    auto* owner = object->context ? dynamic_cast<GameScene*>(&object->context->objects) : this;
+    if (!owner) owner = this;
+    if (owner->processingFrame || owner->initializingObject || owner->cleaningUp || owner->cleanupDepth ||
+        (owner->physicsWorld && owner->physicsWorld->IsLocked()) ||
+        (object->context && object->context->physics.IsLocked()))
+        owner->rejectedObjects.emplace_back(std::move(object));
+    else
+    {
+        ScopedObjectCleanup cleanup(owner->cleanupDepth, owner->cleanupRequested, *owner);
+        if (!TryCleanup("Rejected object cleanup", [&object] { object->CleanUp(); }))
+            owner->rejectedObjects.emplace_back(std::move(object));
+        else
+            object.reset();
+    }
+}
+
+void GameScene::RetireObject(std::unique_ptr<GameObject> object)
+{
+    if (object) CleanupRejected(std::move(object));
+}
+
+void GameScene::ProcessRejectedObjects()
+{
+    RequireUnlockedPhysics();
+    const auto count = rejectedObjects.size();
+    for (std::size_t index = 0; index < count; ++index)
+    {
+        // Retain ownership on failure, just like ordinary removal requests.
+        rejectedObjects.front()->CleanUp();
+        rejectedObjects.pop_front();
+    }
 }

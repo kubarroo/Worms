@@ -30,6 +30,14 @@ namespace
 class HeadlessCommands : public ObjectCommands
 {
 public:
+    ~HeadlessCommands() override
+    {
+        for (auto& object : retired) object->CleanUp();
+    }
+    void RetireObject(std::unique_ptr<GameObject> object) override
+    {
+        retired.push_back(std::move(object));
+    }
     void QueueAdd(std::unique_ptr<GameObject>) override
     {
         throw std::logic_error("Headless test has no object queue");
@@ -38,6 +46,8 @@ public:
     {
         throw std::logic_error("Headless test has no object queue");
     }
+private:
+    std::vector<std::unique_ptr<GameObject>> retired;
 };
 
 class ScopedSdlRuntime
@@ -475,6 +485,99 @@ TEST(HandleSafety, TargetSystemTracksFollowerMembershipAndPreservesOffsets)
     TargetSystem::Update(registry);
     EXPECT_FLOAT_EQ(registry.get<Position>(follower).x, 32);
     EXPECT_FLOAT_EQ(registry.get<Position>(follower).y, 37);
+}
+
+TEST(HandleSafety, ParticleCallbacksCanCompactPoolsWithoutUsingOldReferences)
+{
+    entt::registry registry;
+    const auto makeParticle = [&]
+    {
+        const auto id = registry.create();
+        registry.emplace<Particle>(id);
+        registry.emplace<Position>(id);
+        registry.emplace<Scale>(id, Scale{4});
+        registry.emplace<Sprite>(id);
+        registry.emplace<Motion>(id, Motion{2, 3});
+        return id;
+    };
+    const auto victim = makeParticle();
+    const auto current = makeParticle();
+    registry.get<Particle>(current).vel_characteristic = [&](float x, float y)
+    {
+        registry.destroy(victim);
+        return std::pair{x + 5, y + 6};
+    };
+    registry.get<Particle>(current).size_characteristic = [](float size) { return size / 2; };
+    EXPECT_NO_THROW(ParticleUpdater::Update(registry));
+    EXPECT_FALSE(registry.valid(victim));
+    EXPECT_FLOAT_EQ(registry.get<Motion>(current).v_x, 7);
+    EXPECT_FLOAT_EQ(registry.get<Motion>(current).v_y, 9);
+    EXPECT_FLOAT_EQ(registry.get<Scale>(current).size, 2);
+}
+
+TEST(HandleSafety, ParticleCallbacksPreserveMutableStateAcrossUpdatesAndCompaction)
+{
+    entt::registry registry;
+    const auto victim = registry.create();
+    const auto current = registry.create();
+    registry.emplace<Particle>(victim);
+    registry.emplace<Motion>(victim);
+    registry.emplace<Scale>(victim);
+    registry.emplace<Particle>(current);
+    registry.emplace<Position>(current);
+    registry.emplace<Motion>(current);
+    registry.emplace<Scale>(current);
+    registry.emplace<Sprite>(current);
+    registry.get<Particle>(current).vel_characteristic =
+        [&, calls = 0](float, float) mutable
+        {
+            if (++calls == 1) registry.destroy(victim);
+            return std::pair{static_cast<float>(calls), static_cast<float>(calls * 2)};
+        };
+    registry.get<Particle>(current).size_characteristic =
+        [calls = 0](float) mutable { return static_cast<float>(++calls); };
+    for (int frame = 1; frame <= 3; ++frame)
+    {
+        EXPECT_NO_THROW(ParticleUpdater::Update(registry));
+        EXPECT_FLOAT_EQ(registry.get<Motion>(current).v_x, static_cast<float>(frame));
+        EXPECT_FLOAT_EQ(registry.get<Motion>(current).v_y, static_cast<float>(frame * 2));
+        EXPECT_FLOAT_EQ(registry.get<Scale>(current).size, static_cast<float>(frame));
+    }
+}
+
+TEST(HandleSafety, ParticleCallbackCannotWriteToRecycledEntityOrUseRemovedComponents)
+{
+    entt::registry registry;
+    const auto makeParticle = [&]
+    {
+        const auto id = registry.create();
+        registry.emplace<Particle>(id);
+        registry.emplace<Position>(id);
+        registry.emplace<Scale>(id, Scale{4});
+        registry.emplace<Sprite>(id);
+        registry.emplace<Motion>(id, Motion{2, 3});
+        return id;
+    };
+    const auto current = makeParticle();
+    EntityId replacement = entt::null;
+    registry.get<Particle>(current).vel_characteristic = [&](float, float)
+    {
+        registry.destroy(current);
+        replacement = makeParticle();
+        return std::pair{100.f, 200.f};
+    };
+    EXPECT_NO_THROW(ParticleUpdater::Update(registry));
+    ASSERT_TRUE(registry.valid(replacement));
+    EXPECT_NE(current, replacement);
+    EXPECT_EQ(entt::to_entity(current), entt::to_entity(replacement));
+    EXPECT_FLOAT_EQ(registry.get<Motion>(replacement).v_x, 2);
+    registry.get<Particle>(replacement).size_characteristic = [&](float)
+    {
+        registry.remove<Scale>(replacement);
+        return 100.f;
+    };
+    EXPECT_NO_THROW(ParticleUpdater::Update(registry));
+    EXPECT_FALSE(registry.all_of<Scale>(replacement));
 }
 
 TEST(HandleSafety, SpriteRendererUsesExplicitOrderAcrossCompactionSlotReuseAndLayerChanges)

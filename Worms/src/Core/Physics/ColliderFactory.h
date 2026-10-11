@@ -42,6 +42,8 @@ public:
 private:
     void BindMetadata(PhysicsInfo& info) const
     {
+        if (physicsWorld.IsLocked())
+            throw std::logic_error("Collider creation requires an unlocked physics world");
         if (info.world && info.world != &physicsWorld)
             throw std::invalid_argument("Collider metadata belongs to another physics world");
         info.world = &physicsWorld;

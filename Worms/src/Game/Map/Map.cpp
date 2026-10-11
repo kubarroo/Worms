@@ -65,6 +65,7 @@ void Map::Update()
 
 void Map::CleanUp()
 {
+    RequireUnlockedPhysics();
     if (!HasEntity())
     {
         return;
