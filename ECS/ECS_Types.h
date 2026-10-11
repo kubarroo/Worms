@@ -1,35 +1,14 @@
 #pragma once
-#include "../Worms/src/ExceptionHandling/ECS_Exception.h"
-#include <bitset>
-#include <cstdint>
-#include <exception>
+#include <entt/entity/entity.hpp>
+#include <entt/entity/fwd.hpp>
 
-#define MAX_COMPONENTS 32
-#define MAX_ENTITIES 50000
-#define MAX_SYSTEMS 16
+using EntityId = entt::entity;
 
-typedef uint16_t EntityId;
-class EntityManager;
-// Observers validate this handle against its original, still-living world before use.
+// EnTT versions reject recycled entities; the owner rejects foreign registries.
+// The original registry must still be alive when this handle is checked.
 struct EntityHandle
 {
-    EntityId id = 0;
-    uint64_t generation = 0;
-    const EntityManager* owner = nullptr;
+    EntityId id = entt::null;
+    const entt::registry* owner = nullptr;
     bool operator==(const EntityHandle&) const = default;
 };
-typedef uint8_t ComponentType;
-typedef std::bitset<MAX_COMPONENTS> Signature;
-
-#define ECS_VERBOSE 1
-
-#if ECS_VERBOSE
-#include "../Worms/src/Terminal/Terminal.h"
-#define LOG(x) Terminal::Get().Log(x, LogLevel::INFO);
-#else
-#define LOG(x)
-#endif
-
-#ifndef ECS_THROW
-#define ECS_THROW(message) throw std::exception(message)
-#endif // !ECS_THROW

@@ -8,6 +8,7 @@
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Tags.h"
 #include "Game/Weapon/Weapon.h"
+#include "Game/RenderOrder.h"
 
 Weapon::Weapon( Camera& camera ) : camera( camera )
 {
@@ -20,6 +21,8 @@ void Weapon::Initialise(const SceneContext& context)
 	{
 		world->AddComponent<Position>( objectId, { 0, 0 } );
 		world->AddComponent<Rotation>( objectId, { 0 } );
+        world->AddComponent<RenderOrder>(objectId,
+            NextRenderOrder(context.registry, RenderLayer::Weapons));
 		world->AddComponent<Sprite>( objectId );
 		powerBar = context.resources.GetTexture("powerBar.png");
 		canShoot = true;

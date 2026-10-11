@@ -10,6 +10,7 @@
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Weapon/Projectile.h"
 #include "Core/Audio/Audio.h"
+#include "Game/RenderOrder.h"
 
 Projectile::Projectile( float posX, float posY, float vX, float vY ) : startPosX( posX ), startPosY( posY ), startVelX( vX ), startVelY( vY )
 {
@@ -74,6 +75,8 @@ void Projectile::Initialise(const SceneContext& context)
     {
         timer.Reset();
         world->AddComponent<Position>(objectId, {startPosX, startPosY});
+        world->AddComponent<RenderOrder>(objectId,
+            NextRenderOrder(context.registry, RenderLayer::Projectiles));
         world->AddComponent<Sprite>(objectId, {texture});
         world->AddComponent<Rotation>(objectId, {0});
         auto& rigidBody = world->AddComponent<RigidBody>(objectId);

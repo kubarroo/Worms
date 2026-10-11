@@ -6,6 +6,7 @@
 #include "Core/Renderer2D.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Components.h"
+#include "Game/RenderOrder.h"
 #include "SDL3/SDL_surface.h"
 #include "box2d/b2_chain_shape.h"
 #include "box2d/b2_fixture.h"
@@ -35,6 +36,8 @@ void Map::Initialise(const SceneContext& context)
         SDL_CHECK(mapTexture.get());
         const auto size = context.rendering.TextureSize(mapTexture.get());
         mapSize = {size.x, size.y};
+        world->AddComponent<RenderOrder>(objectId,
+            NextRenderOrder(context.registry, RenderLayer::Terrain));
         world->AddComponent<Sprite>(objectId, {mapTexture.get()});
         CreateNewColliders();
     }

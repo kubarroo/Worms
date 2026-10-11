@@ -3,6 +3,7 @@
 #include "Core/Audio/Audio.h"
 #include "Core/Renderer2D.h"
 #include "Core/ResourceManager.h"
+#include "Game/RenderOrder.h"
 #include "Core/ParticleSystem.h"
 #include "Core/Physics/ContactManager.h"
 #include "Core/Time.h"
@@ -43,6 +44,8 @@ void Worm::Initialise(const SceneContext& context)
         groundedPhysicsInfo.tag = PhysicsTag::GROUNDED;
         groundedPhysicsInfo.id = groundedId;
 
+        world->AddComponent<RenderOrder>(objectId,
+            NextRenderOrder(context.registry, RenderLayer::Actors));
         Sprite& spriteComponent = world->AddComponent<Sprite>(objectId);
         spriteTexture = context.resources.GetTexture("worms.png");
         spriteComponent.texture = spriteTexture;
@@ -148,7 +151,7 @@ void Worm::CleanUp()
     {
         world->DestroyEntity(groundedId);
         hasGroundedEntity = false;
-        groundedId = {};
+        groundedId = entt::null;
     }
     if (healthBar)
     {

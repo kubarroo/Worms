@@ -1,184 +1,114 @@
-#include <numbers>
 #pragma once
 #include "Core/Camera/Camera.h"
-#include "ECS/System.h"
-#include "Game/Components.h"
 #include "Core/Renderer2D.h"
+#include "Game/Components.h"
+#include <entt/entity/registry.hpp>
+#include <numbers>
 
-class Movement : public System
+class Movement
 {
 public:
-    Movement(ComponentManager& componentManager) : System(componentManager)
+    static void Update(entt::registry& registry)
     {
-        systemSignature.set(componentManager.GetComponentId<Position>(), true);
-        systemSignature.set(componentManager.GetComponentId<Motion>(), true);
-    }
-
-    virtual void Update() override
-    {
-        auto& positions = componentManager.GetComponentArray<Position>();
-        auto& motions = componentManager.GetComponentArray<Motion>();
-        for (EntityId ent : subscribed)
+        for (auto [entity, position, motion] : registry.view<Position, Motion>().each())
         {
-            positions.GetData(ent).x += motions.GetData(ent).v_x;
-            positions.GetData(ent).y += motions.GetData(ent).v_y;
+            position.x += motion.v_x;
+            position.y += motion.v_y;
         }
     }
 };
 
-class SpriteRenderer : public System
+class PhysicsSynchronizer
 {
 public:
-    SpriteRenderer(ComponentManager& componentManager, Renderer2D& renderer, Camera& camera)
-        : System(componentManager), renderer(renderer), camera(camera)
+    static void Update(entt::registry& registry)
     {
-        systemSignature.set(componentManager.GetComponentId<Position>(), true);
-        systemSignature.set(componentManager.GetComponentId<Sprite>(), true);
-    }
-
-    virtual void Render() override
-    {
-        auto& positions = componentManager.GetComponentArray<Position>();
-        auto& sprites = componentManager.GetComponentArray<Sprite>();
-        for (EntityId ent : subscribed)
+        for (auto [entity, position, rigidBody] : registry.view<Position, RigidBody>().each())
         {
-            if (!sprites.GetData(ent).texture)
-            {
-                continue;
-            }
-            auto size = renderer.TextureSize(sprites.GetData(ent).texture);
-
-            auto scale = componentManager.TryGetComponent<Scale>(ent);
-            float scaleFactor = 1.f;
-            if (scale.has_value())
-                scaleFactor = scale->get().size;
-
-            RenderRect destination;
-            destination.x = static_cast<int>(400 + 100.0 * (positions.GetData(ent).x - camera.X()) -
-                                             size.x / 2 * scaleFactor);
-            destination.y = static_cast<int>(300 - 100.0 * (positions.GetData(ent).y - camera.Y()) -
-                                             size.y / 2 * scaleFactor);
-            destination.w = static_cast<int>(size.x * scaleFactor);
-            destination.h = static_cast<int>(size.y * scaleFactor);
-
-            auto angle = componentManager.TryGetComponent<Rotation>(ent);
-            renderer.DrawSprite(sprites.GetData(ent).texture, destination, {},
-                                angle ? -angle->get().degree : 0.0);
+            if (!rigidBody.body) continue;
+            position.x = rigidBody.body->GetPosition().x;
+            position.y = rigidBody.body->GetPosition().y;
+            if (auto* angle = registry.try_get<Rotation>(entity))
+                angle->degree = rigidBody.body->GetAngle() * 180 /
+                                static_cast<float>(std::numbers::pi);
         }
     }
-
-private:
-    Renderer2D& renderer;
-    Camera& camera;
 };
 
-class PhysicsSynchronizer : public System
+class TargetSystem
 {
 public:
-    PhysicsSynchronizer(ComponentManager& componentManager) : System(componentManager)
+    static void Update(entt::registry& registry)
     {
-        systemSignature.set(componentManager.GetComponentId<Position>(), true);
-        systemSignature.set(componentManager.GetComponentId<RigidBody>(), true);
-    }
-
-    virtual void Update() override
-    {
-        auto& positions = componentManager.GetComponentArray<Position>();
-        auto& rigidBody = componentManager.GetComponentArray<RigidBody>();
-        for (EntityId ent : subscribed)
+        for (auto [entity, position, follow] : registry.view<Position, Follow>().each())
         {
-            if (!rigidBody.GetData(ent).body)
+            if (!follow.id) continue;
+            if (follow.id->owner != &registry || !registry.valid(follow.id->id))
             {
+                follow.id.reset();
                 continue;
             }
-            positions.GetData(ent).x = rigidBody.GetData(ent).body->GetPosition().x;
-            positions.GetData(ent).y = rigidBody.GetData(ent).body->GetPosition().y;
-
-            auto angle = componentManager.TryGetComponent<Rotation>(ent);
-            if (angle.has_value())
-                angle.value().get().degree =
-                    rigidBody.GetData(ent).body->GetAngle() * 180 / static_cast<float>(std::numbers::pi);
+            const auto* target = registry.try_get<Position>(follow.id->id);
+            if (!target)
+            {
+                follow.id.reset();
+                continue;
+            }
+            const auto targetPosition = *target;
+            position.x = targetPosition.x + follow.offsetX;
+            position.y = targetPosition.y + follow.offsetY;
         }
     }
-
-private:
 };
 
-class TargetSystem : public System
+class ParticleUpdater
 {
 public:
-    TargetSystem(ComponentManager& componentManager, World& world)
-        : System(componentManager), world(world)
+    static void Update(entt::registry& registry)
     {
-        systemSignature.set(componentManager.GetComponentId<Follow>(), true);
-        systemSignature.set(componentManager.GetComponentId<Position>(), true);
-    }
-
-    virtual void Update() override
-    {
-        auto& positions = componentManager.GetComponentArray<Position>();
-        auto& follows = componentManager.GetComponentArray<Follow>();
-        for (EntityId ent : subscribed)
+        for (auto [entity, particle, position, scale, sprite, motion] :
+             registry.view<Particle, Position, Scale, Sprite, Motion>().each())
         {
-            auto& target = follows.GetData(ent);
-            if (!target.id)
-            {
-                continue;
-            }
-            if (!world.IsAlive(*target.id))
-            {
-                target.id.reset();
-                continue;
-            }
-            auto targetComponent = positions.TryGetData(target.id->id);
-            if (!targetComponent)
-            {
-                target.id.reset();
-                continue;
-            }
-            const auto targetPosition = targetComponent->get();
-            positions.GetData(ent).x = targetPosition.x + target.offsetX;
-            positions.GetData(ent).y = targetPosition.y + target.offsetY;
-        }
-    }
-
-private:
-    World& world;
-};
-
-class ParticleUpdater : public System
-{
-public:
-    ParticleUpdater(ComponentManager& componentManager) : System(componentManager)
-    {
-        systemSignature.set(componentManager.GetComponentId<Particle>(), true);
-        systemSignature.set(componentManager.GetComponentId<Position>(), true);
-        systemSignature.set(componentManager.GetComponentId<Scale>(), true);
-        systemSignature.set(componentManager.GetComponentId<Sprite>(), true);
-        systemSignature.set(componentManager.GetComponentId<Motion>(), true);
-    }
-
-    void Update() override
-    {
-        auto& particles = componentManager.GetComponentArray<Particle>();
-        auto& positions = componentManager.GetComponentArray<Position>();
-        auto& scales = componentManager.GetComponentArray<Scale>();
-        auto& sprites = componentManager.GetComponentArray<Sprite>();
-        auto& motions = componentManager.GetComponentArray<Motion>();
-
-        for (EntityId ent : subscribed)
-        {
-            auto& particle = particles.GetData(ent);
-            auto& motion = motions.GetData(ent);
-            if (particle.vel_characteristic != nullptr)
+            if (particle.vel_characteristic)
             {
                 auto [x, y] = particle.vel_characteristic(motion.v_x, motion.v_y);
                 motion.v_x = x;
                 motion.v_y = y;
             }
+            if (particle.size_characteristic)
+                scale.size = particle.size_characteristic(scale.size);
+        }
+    }
+};
 
-            if (particle.size_characteristic != nullptr)
-                scales.GetData(ent).size = particle.size_characteristic(scales.GetData(ent).size);
+class SpriteRenderer
+{
+public:
+    static void Render(entt::registry& registry, Renderer2D& renderer, const Camera& camera)
+    {
+        registry.sort<RenderOrder>([](const RenderOrder& left, const RenderOrder& right)
+                                  {
+                                      if (left.layer != right.layer)
+                                          return left.layer < right.layer;
+                                      return left.order < right.order;
+                                  });
+        auto view = registry.view<const Position, const Sprite, const RenderOrder>();
+        view.use<RenderOrder>();
+        for (auto [entity, position, sprite, order] : view.each())
+        {
+            if (!sprite.texture) continue;
+            const auto size = renderer.TextureSize(sprite.texture);
+            const auto* scale = registry.try_get<Scale>(entity);
+            const float factor = scale ? scale->size : 1.f;
+            RenderRect destination;
+            destination.x = static_cast<int>(400 + 100.0 * (position.x - camera.X()) -
+                                             size.x / 2 * factor);
+            destination.y = static_cast<int>(300 - 100.0 * (position.y - camera.Y()) -
+                                             size.y / 2 * factor);
+            destination.w = static_cast<int>(size.x * factor);
+            destination.h = static_cast<int>(size.y * factor);
+            const auto* angle = registry.try_get<Rotation>(entity);
+            renderer.DrawSprite(sprite.texture, destination, {}, angle ? -angle->degree : 0.0);
         }
     }
 };

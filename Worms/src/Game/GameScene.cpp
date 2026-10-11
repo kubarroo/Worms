@@ -8,6 +8,7 @@
 #include "Core/Physics/b2ColliderDraw.h"
 #include "ECS/World.h"
 #include "Game/Components.h"
+#include "Game/RenderOrder.h"
 #include "Game/Map/Map.h"
 #include "Game/Player/WormManager.h"
 #include "Game/Systems.h"
@@ -104,13 +105,7 @@ void GameScene::Initialize()
     ownsRuntime = true;
     try
     {
-        world = std::make_unique<World>(renderer);
-
-        registerComponents();
-        world->RegisterSystem<Movement>();
-        world->RegisterSystem<PhysicsSynchronizer>();
-        world->RegisterSystem<TargetSystem>(*world);
-        world->RegisterSystem<ParticleUpdater>();
+        world = std::make_unique<World>(registry);
         physicsWorld = std::make_unique<b2World>(b2Vec2(0, -9.811f));
         contacts = std::make_unique<ContactManager>();
         colliders = std::make_unique<ColliderFactory>(*physicsWorld, *contacts);
@@ -120,7 +115,6 @@ void GameScene::Initialize()
         auto cameraPtr = camera.get();
         this->camera = cameraPtr;
         QueueAdd(std::move(camera));
-        world->RegisterSystem<SpriteRenderer>(rendering, *cameraPtr);
 
         setUpDebugDraw(*cameraPtr);
         auto weapon = std::make_unique<Weapon>(*cameraPtr);
@@ -165,19 +159,6 @@ void GameScene::setUpDebugDraw(Camera& camera)
     physicsWorld->SetContactListener(contacts.get());
 }
 
-void GameScene::registerComponents()
-{
-    world->RegisterComponent<Position>();
-    world->RegisterComponent<Rotation>();
-    world->RegisterComponent<Health>();
-    world->RegisterComponent<Sprite>();
-    world->RegisterComponent<Motion>();
-    world->RegisterComponent<RigidBody>();
-    world->RegisterComponent<Follow>();
-    world->RegisterComponent<Scale>();
-    world->RegisterComponent<Particle>();
-}
-
 const SceneContext& GameScene::Context() const
 {
     if (!ownsRuntime || cleaningUp || !context)
@@ -194,7 +175,8 @@ void GameScene::ValidateObject(const GameObject& object) const
     if (object.HasEntity() && object.world != world.get())
         throw std::invalid_argument("Object belongs to another ECS world");
     if (object.context &&
-        (&object.context->physics != physicsWorld.get() || object.context->renderer != renderer ||
+        (&object.context->registry != &registry ||
+         &object.context->physics != physicsWorld.get() || object.context->renderer != renderer ||
          &object.context->colliders != colliders.get() ||
          &object.context->contacts != contacts.get() || &object.context->resources != &resources ||
          &object.context->rendering != &rendering || &object.context->audio != &audio ||
@@ -331,7 +313,10 @@ void GameScene::Update()
     ScopedFrame frame(processingFrame);
     contacts->Update();
 
-    world->Update();
+    Movement::Update(registry);
+    PhysicsSynchronizer::Update(registry);
+    TargetSystem::Update(registry);
+    ParticleUpdater::Update(registry);
     contacts->RethrowPendingException();
     physicsWorld->Step(static_cast<float>(Time::deltaTime), 8, 3);
     contacts->RethrowPendingException();
@@ -360,7 +345,7 @@ void GameScene::Render()
     for (auto& gameObject : activeObjects)
         gameObject->Render();
 
-    world->Render();
+    SpriteRenderer::Render(registry, rendering, *camera);
     wormManager->RenderHealthBars();
 }
 
@@ -433,6 +418,8 @@ void GameScene::CleanUp() noexcept
     physicsWorld.reset();
     contacts.reset();
     world.reset();
+    registry.clear();
+    registry.ctx().erase<RenderSequence>();
 
     ownsRuntime = false;
     cleaningUp = false;

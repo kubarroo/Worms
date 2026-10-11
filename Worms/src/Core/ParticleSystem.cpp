@@ -1,5 +1,6 @@
 #include "ParticleSystem.h"
 #include "Core/ResourceManager.h"
+#include "Game/RenderOrder.h"
 #include <stdexcept>
 
 ParticleSystem::ParticleSystem(std::string particleImg, float startScale, float startPosX,
@@ -64,6 +65,8 @@ void ParticleSystem::Initialise(const SceneContext& context)
                                            [](double x) { return x * 0.98; }});
             world->AddComponent<Position>(particleId, {startPosX, startPosY});
             world->AddComponent<Motion>(particleId, {vel.x, vel.y});
+            world->AddComponent<RenderOrder>(particleId,
+                NextRenderOrder(context.registry, RenderLayer::Effects));
             world->AddComponent<Sprite>(particleId, {texture});
             world->AddComponent<Scale>(particleId, {startScale * rand() / RAND_MAX});
         }

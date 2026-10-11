@@ -11,7 +11,7 @@ developed for a university computer graphics course.
 - Bazooka and grenade weapons
 - Sound effects and music
 - Dear ImGui debug tools
-- Custom ECS, planned for replacement with EnTT
+- EnTT ECS with scene-owned registries
 
 ## Requirements
 
@@ -120,7 +120,7 @@ It may not reflect subsequent architecture changes.
 
 ## Planned Changes
 
-- Replace the custom ECS with EnTT
+- Complete migration of gameplay access from the temporary World adapter to EnTT
 - Improve resource ownership and object lifetimes
 - Refactor scene management and gameplay systems
 

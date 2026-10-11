@@ -42,7 +42,7 @@ static_assert(BorrowsNamedPhysicsInfo<&ColliderFactory::CreateStaticFixture, b2B
 TEST(ColliderFactorySafety, EveryBodyUsesRequestedPositionAndBorrowedMetadata)
 {
     ContactManager contacts;
-    PhysicsInfo info{PhysicsTag::NONE, 7};
+    PhysicsInfo info{PhysicsTag::NONE, static_cast<EntityId>(7)};
     b2World world({0, 0});
     ColliderFactory factory(world, contacts);
     b2PolygonShape shape;
@@ -72,7 +72,7 @@ TEST(ColliderFactorySafety, EveryBodyUsesRequestedPositionAndBorrowedMetadata)
 TEST(ColliderFactorySafety, EveryFixtureBorrowsTheSuppliedMetadata)
 {
     ContactManager contacts;
-    PhysicsInfo info{PhysicsTag::NONE, 7};
+    PhysicsInfo info{PhysicsTag::NONE, static_cast<EntityId>(7)};
     b2World world({0, 0});
     ColliderFactory factory(world, contacts);
     b2BodyDef bodyDef;
@@ -405,7 +405,7 @@ protected:
         contacts.ClearAll();
     }
     ContactManager contacts;
-    PhysicsInfo info{PhysicsTag::NONE, 0};
+    PhysicsInfo info{PhysicsTag::NONE, static_cast<EntityId>(0)};
     b2World world{b2Vec2{0, 0}};
     b2Body* movingBody = nullptr;
 };
@@ -418,7 +418,7 @@ TEST_F(ContactCleanup, IndependentWorldsDispatchTheSameEntityIdToTheirOwnListene
     ColliderFactory factory(world, contacts);
     ColliderFactory otherFactory(otherWorld, otherContacts);
     PhysicsInfo fixedInfo{PhysicsTag::NONE, info.id};
-    PhysicsInfo movingInfo{PhysicsTag::NONE, static_cast<EntityId>(info.id + 1)};
+    PhysicsInfo movingInfo{PhysicsTag::NONE, static_cast<EntityId>(entt::to_integral(info.id) + 1)};
     b2PolygonShape shape;
     shape.SetAsBox(0.5f, 0.5f);
     auto otherFixed = otherFactory.CreateStaticBody(&shape, {0, 0}, fixedInfo);
@@ -493,14 +493,14 @@ TEST_F(ContactCleanup, TagHelpersSkipMissingUserDataOnEitherFixture)
     auto* second = contact->GetFixtureB();
     first->GetUserData().pointer = 0;
     second->GetUserData().pointer = reinterpret_cast<uintptr_t>(&info);
-    EXPECT_EQ(GetEntityWithTag(contact, WORM), std::optional<EntityId>{0});
+    EXPECT_EQ(GetEntityWithTag(contact, WORM), std::optional<EntityId>{static_cast<EntityId>(0)});
     EXPECT_EQ(GetObjectWithTag(contact, WORM), std::optional<b2Body*>{second->GetBody()});
     EXPECT_FALSE(GetEntityWithTag(contact, DESTRUCTION_FIELD));
     EXPECT_FALSE(GetObjectWithTag(contact, DESTRUCTION_FIELD));
 
     first->GetUserData().pointer = reinterpret_cast<uintptr_t>(&info);
     second->GetUserData().pointer = 0;
-    EXPECT_EQ(GetEntityWithTag(contact, WORM), std::optional<EntityId>{0});
+    EXPECT_EQ(GetEntityWithTag(contact, WORM), std::optional<EntityId>{static_cast<EntityId>(0)});
     EXPECT_EQ(GetObjectWithTag(contact, WORM), std::optional<b2Body*>{first->GetBody()});
     EXPECT_FALSE(GetEntityWithTag(contact, DESTRUCTION_FIELD));
     EXPECT_FALSE(GetObjectWithTag(contact, DESTRUCTION_FIELD));
@@ -689,7 +689,7 @@ TEST_F(ContactCleanup, AddedCallbackForOtherFixtureWaitsUntilNextContactDispatch
     auto& manager = contacts;
     auto* contact = world.GetContactList();
     ASSERT_NE(contact, nullptr);
-    PhysicsInfo other{PhysicsTag::NONE, 1};
+    PhysicsInfo other{PhysicsTag::NONE, static_cast<EntityId>(1)};
     contact->GetFixtureA()->GetUserData().pointer = reinterpret_cast<uintptr_t>(&info);
     contact->GetFixtureB()->GetUserData().pointer = reinterpret_cast<uintptr_t>(&other);
     int calls = 0;

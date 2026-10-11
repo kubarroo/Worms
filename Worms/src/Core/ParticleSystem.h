@@ -1,10 +1,10 @@
 #pragma once
 #include "Core/GameObject.h"
 #include "Core/Time.h"
-#include "ECS/System.h"
 #include "ExceptionHandling/SDL_Exception.h"
 #include "Game/Components.h"
 #include <random>
+#include <vector>
 
 class ParticleSystem : public GameObject
 {

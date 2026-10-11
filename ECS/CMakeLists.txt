@@ -1,12 +1,3 @@
-add_library(worms_ecs STATIC
-    World.cpp
-    EntityManager.cpp
-    ComponentManager.cpp
-    SystemManager.cpp
-)
-
-target_include_directories(worms_ecs PUBLIC
-    "${PROJECT_SOURCE_DIR}"
-)
-
-target_link_libraries(worms_ecs PUBLIC SDL3::SDL3)
+add_library(worms_ecs INTERFACE)
+target_include_directories(worms_ecs INTERFACE "${PROJECT_SOURCE_DIR}")
+target_link_libraries(worms_ecs INTERFACE EnTT::EnTT)

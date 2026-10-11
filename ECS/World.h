@@ -1,99 +1,82 @@
 #pragma once
-#include "ECS/ComponentManager.h"
-#include "ECS/EntityManager.h"
-#include "ECS/SystemManager.h"
-#include <SDL3/SDL.h>
+#include "ECS/ECS_Types.h"
+#include <entt/entity/registry.hpp>
+#include <functional>
 #include <optional>
+#include <stdexcept>
+#include <utility>
 
-
+// Temporary gameplay adapter. The scene owns the registry and must outlive this object.
 class World
 {
 public:
-    World(SDL_Renderer* renderer);
+    explicit World(entt::registry& registry) : registry(registry) {}
     World(const World&) = delete;
+    World& operator=(const World&) = delete;
     World(World&&) = delete;
+    World& operator=(World&&) = delete;
 
-    EntityId CreateEntity();
-    void DestroyEntity(const EntityId ent);
-    bool IsAlive(EntityId ent) const { return entManager.IsAlive(ent); }
-    bool IsAlive(EntityHandle handle) const { return entManager.IsAlive(handle); }
-    std::optional<EntityHandle> GetHandle(EntityId ent) const
+    entt::registry& Registry() { return registry; }
+    const entt::registry& Registry() const { return registry; }
+    EntityId CreateEntity() { return registry.create(); }
+    void DestroyEntity(EntityId entity)
     {
-        return entManager.GetHandle(ent);
+        if (IsAlive(entity)) registry.destroy(entity);
+    }
+    bool IsAlive(EntityId entity) const { return registry.valid(entity); }
+    bool IsAlive(EntityHandle handle) const
+    {
+        return handle.owner == &registry && IsAlive(handle.id);
+    }
+    std::optional<EntityHandle> GetHandle(EntityId entity) const
+    {
+        if (!IsAlive(entity)) return {};
+        return EntityHandle{entity, &registry};
+    }
+    std::size_t GetEntityCount() const
+    {
+        return std::as_const(registry).storage<EntityId>()->free_list();
     }
 
-    uint16_t GetAmountOfAvailableEntities() const
+    template <typename Component> Component& AddComponent(EntityId entity)
     {
-        return entManager.GetAmountOfAvailableEntities();
+        RequireNewComponent<Component>(entity);
+        return registry.emplace<Component>(entity);
+    }
+    template <typename Component> Component& AddComponent(EntityId entity, Component component)
+    {
+        RequireNewComponent<Component>(entity);
+        return registry.emplace<Component>(entity, std::move(component));
+    }
+    template <typename Component> Component& GetComponent(EntityId entity)
+    {
+        auto result = TryGetComponent<Component>(entity);
+        if (!result) throw std::logic_error("Entity has no requested component");
+        return result->get();
+    }
+    template <typename Component>
+    std::optional<std::reference_wrapper<Component>> TryGetComponent(EntityId entity)
+    {
+        if (!IsAlive(entity)) return {};
+        if (auto* component = registry.try_get<Component>(entity)) return std::ref(*component);
+        return {};
+    }
+    template <typename Component> void RemoveComponent(EntityId entity)
+    {
+        RequireAlive(entity);
+        registry.remove<Component>(entity);
     }
 
-    EntityId CopyEntity(const EntityId toCopy);
-
-    template <typename Component> void RegisterComponent();
-    template <typename System, typename... Args> void RegisterSystem(Args&&... params);
-
-    template <typename Component> Component& AddComponent(const EntityId ent);
-    template <typename Component>
-    Component& AddComponent(const EntityId ent, const Component&& component);
-    template <typename Component> Component& GetComponent(const EntityId ent);
-    template <typename Component>
-    std::optional<std::reference_wrapper<Component>> TryGetComponent(const EntityId ent);
-    template <typename Component> void RemoveComponent(const EntityId ent);
-
-    void Update();
-    void Render();
-
 private:
-    SDL_Renderer* renderer;
-
-private:
-    EntityManager entManager{};
-    ComponentManager comManager{};
-    SystemManager sysManager{comManager};
+    void RequireAlive(EntityId entity) const
+    {
+        if (!IsAlive(entity)) throw std::logic_error("Entity is not alive");
+    }
+    template <typename Component> void RequireNewComponent(EntityId entity) const
+    {
+        RequireAlive(entity);
+        if (registry.all_of<Component>(entity))
+            throw std::logic_error("Entity already has the component");
+    }
+    entt::registry& registry;
 };
-
-template <typename Component> inline void World::RegisterComponent()
-{
-    LOG("Registered " + (std::string) typeid(Component).name() + " Component");
-    comManager.RegisterComponent<Component>();
-}
-
-template <typename System, typename... Args> inline void World::RegisterSystem(Args&&... params)
-{
-    LOG("Registered " + (std::string) typeid(System).name() + " System");
-    sysManager.RegisterSystem<System>(std::forward<Args>(params)...);
-}
-
-template <typename Component> Component& World::AddComponent(const EntityId ent)
-{
-    Signature newSign = entManager.AddToSignature(ent, comManager.GetComponentId<Component>());
-    sysManager.OnSignatureChange(ent, newSign);
-    return comManager.AddComponent<Component>(ent);
-}
-
-template <typename Component>
-inline Component& World::AddComponent(const EntityId ent, const Component&& component)
-{
-    Signature newSign = entManager.AddToSignature(ent, comManager.GetComponentId<Component>());
-    sysManager.OnSignatureChange(ent, newSign);
-    return comManager.AddComponent<Component>(ent, std::move(component));
-}
-
-template <typename Component> Component& World::GetComponent(const EntityId ent)
-{
-    return comManager.GetComponent<Component>(ent);
-}
-
-template <typename Component>
-std::optional<std::reference_wrapper<Component>> World::TryGetComponent(const EntityId ent)
-{
-    if (!IsAlive(ent)) return {};
-    return comManager.TryGetComponent<Component>(ent);
-}
-
-template <typename Component> void World::RemoveComponent(const EntityId ent)
-{
-    Signature newSign = entManager.DeleteFromSignature(ent, comManager.GetComponentId<Component>());
-    sysManager.OnSignatureChange(ent, newSign);
-    comManager.RemoveComponent<Component>(ent);
-}

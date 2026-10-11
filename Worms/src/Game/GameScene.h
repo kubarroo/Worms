@@ -3,6 +3,7 @@
 #include <deque>
 #include <memory>
 #include <vector>
+#include <entt/entity/registry.hpp>
 
 struct SDL_Renderer;
 class World;
@@ -40,7 +41,6 @@ public:
 private:
     friend struct GameTestAccess;
     void setUpDebugDraw(Camera& camera);
-    void registerComponents();
     GameObject& ActivateObject(std::unique_ptr<GameObject> object);
     void ProcessPendingAdds();
     void ProcessPendingRemovals();
@@ -60,6 +60,7 @@ private:
     std::vector<std::unique_ptr<GameObject>> activeObjects;
     std::deque<std::unique_ptr<GameObject>> pendingAdds;
     std::deque<GameObject*> pendingRemovals;
+    entt::registry registry;
     std::unique_ptr<World> world;
     std::unique_ptr<b2World> physicsWorld;
     std::unique_ptr<ContactManager> contacts;

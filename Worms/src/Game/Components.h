@@ -4,6 +4,7 @@
 #include <box2d/b2_body.h>
 #include <functional>
 #include <optional>
+#include <cstdint>
 
 struct Position
 {
@@ -24,6 +25,21 @@ struct Sprite
 {
     // Borrowed; the texture owner must outlive this component.
     SDL_Texture* texture = nullptr;
+};
+
+enum class RenderLayer
+{
+    Terrain,
+    Actors,
+    Weapons,
+    Projectiles,
+    Effects
+};
+
+struct RenderOrder
+{
+    RenderLayer layer = RenderLayer::Actors;
+    std::uint64_t order = 0;
 };
 
 struct RigidBody

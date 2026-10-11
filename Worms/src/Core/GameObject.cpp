@@ -13,6 +13,8 @@ void GameObject::Initialise(const SceneContext& newContext)
     {
         throw std::logic_error("GameObject already has an entity");
     }
+    if (&newContext.registry != &newContext.world.Registry())
+        throw std::invalid_argument("Context uses different ECS registries");
     const auto newId = newContext.world.CreateEntity();
     context.emplace(newContext);
     renderer = newContext.renderer;
@@ -29,7 +31,7 @@ void GameObject::CleanUp()
     }
     world->DestroyEntity(objectId);
     hasEntity = false;
-    objectId = {};
+    objectId = entt::null;
     world = nullptr;
     renderer = nullptr;
     context.reset();

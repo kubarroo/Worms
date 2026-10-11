@@ -38,7 +38,7 @@ public:
 
 protected:
     const SceneContext& Context() const;
-    EntityId objectId{};
+    EntityId objectId = entt::null;
     bool hasEntity = false;
     World* world = nullptr;
     SDL_Renderer* renderer = nullptr;

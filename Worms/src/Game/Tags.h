@@ -2,6 +2,7 @@
 #include "ECS/ECS_Types.h"
 #include <box2d/b2_contact.h>
 #include <optional>
+#include <string>
 
 
 enum PhysicsTag
@@ -17,7 +18,7 @@ enum PhysicsTag
 struct PhysicsInfo
 {
     PhysicsTag tag;
-    EntityId id;
+    EntityId id = entt::null;
 };
 
 struct Parameters

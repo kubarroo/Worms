@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include "ECS/World.h"
 
 struct SDL_Renderer;
 class World;
@@ -35,4 +36,5 @@ struct SceneContext
     Renderer2D& rendering;
     Audio& audio;
     Input& input;
+    entt::registry& registry = world.Registry();
 };
